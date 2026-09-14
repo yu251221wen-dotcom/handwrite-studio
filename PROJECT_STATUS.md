@@ -145,21 +145,24 @@ V3.1 本轮完整源码测试已通过；正式 ZIP 与 clean-room 将在部署�
 ## 当前公网地址
 
 - Frontend：Not deployed
-- API：Not deployed
+- API：`https://handwrite-studio-api-production.up.railway.app`
+- Health：`https://handwrite-studio-api-production.up.railway.app/health`（HTTP 200，`status=ok`、`version=3.1.0`、`environment=production`）
 - Showcase：Not deployed
 
 ---
 
 ## 当前部署状态
 
-Deployment prepared。Render 因绑卡要求停用；Railway 已完成账户授权，但按交付顺序暂停部署，先推送 V3.1 安全源码。尚无公网 URL。
+Railway FastAPI production 后端已部署成功：服务 `handwrite-studio-api`，GitHub `main` 提交 `6be676dae57cb93ae5f0b265bb467e4b4cbafa59`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。Render 因绑卡要求停用。
+
+当前 `ALLOWED_ORIGINS=https://handwrite-studio.invalid` 是前端上线前的临时拒绝式占位值；生成实际 HTTPS 前端域名后必须立即替换为精确 Origin。
 
 ---
 
 ## 当前已知问题
 
 - Cloudflare / Vite 开发运行时可能在类型初始化时出现 `fetch failed` / `ECONNRESET`；production build 和本地生产预览稳定
-- 正式公网部署等待 V3.1 源码推送完成后继续 Railway API 与 Sites 前端配置
+- Railway API 已上线；正式前端与 Showcase 尚未部署，且前端上线后需要同步更新 API 的精确 `ALLOWED_ORIGINS`
 - 旧字段布局引擎与字段映射模块仍作为迁移兼容源码保留，但没有正式运行入口
 - 自动排版后手工改页次可保存，但再次全局重排会重建自动页顺序
 - 跨软件关闭的草稿恢复受浏览器 Session 生命周期限制，应使用项目 JSON
