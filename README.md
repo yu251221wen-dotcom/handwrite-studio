@@ -90,7 +90,7 @@ pnpm build
 
 ## 部署
 
-前端沿用现有 Vinext/Cloudflare Sites 构建，FastAPI 使用 `Dockerfile.api` 部署到 Railway。生产环境必须设置真实 `NEXT_PUBLIC_API_BASE_URL`、HTTPS `PUBLIC_API_BASE_URL` 与精确 `ALLOWED_ORIGINS`，不得使用通配 CORS。详见 [部署说明](docs/DEPLOYMENT.md) 和 [V3 架构](docs/V3-ARCHITECTURE.md)。
+前端公网版本使用 Cloudflare Pages 的 Next.js 静态导出，FastAPI 使用 `Dockerfile.api` 部署到 Railway。本地/Vinext 构建保持不变；Pages 使用独立的 `pnpm build:pages`，产物目录为 `out`。生产环境必须设置真实 `NEXT_PUBLIC_API_BASE_URL`、HTTPS `PUBLIC_API_BASE_URL` 与精确 `ALLOWED_ORIGINS`，不得使用通配 CORS。详见 [部署说明](docs/DEPLOYMENT.md) 和 [V3 架构](docs/V3-ARCHITECTURE.md)。
 
 ## 本轮明确暂缓
 

@@ -10,7 +10,7 @@
 
 - Version：3.1.1（V3.1.1）
 - SchemaVersion：3
-- 更新日期：2026-09-14
+- 更新日期：2026-09-15
 - GitHub：`https://github.com/yu251221wen-dotcom/handwrite-studio`
 - Git commit：以仓库 `main` 当前 HEAD 为准
 
@@ -96,9 +96,9 @@
 
 ## 当前最高优先级
 
-当前阶段：V3.1.1 公网收尾完成
+当前阶段：V3.1.1 公网前端迁移
 
-1. 保持 Frontend / API / Showcase 公网地址可用
+1. 将已被移动网络拦截的旧 `chatgpt.site` 前端迁移到 Cloudflare Pages
 2. 保持 Session isolation、精确 CORS 和 `/health`
 3. 保持 Golden Test Missing = 0
 4. 不破坏当前 V3.1.1 功能
@@ -108,7 +108,7 @@
 
 ## 下一阶段
 
-V3.1.1 公网收尾已完成；其后才进入 V4 横线纸自动检测与文字基线吸附。暂时不要提前开发 OCR、透视或 AI 字形。
+先完成 Cloudflare Pages 公网部署、Railway 精确 CORS 更新和真实公网验收；其后才进入 V4 横线纸自动检测与文字基线吸附。暂时不要提前开发 OCR、透视或 AI 字形。
 
 ---
 
@@ -119,6 +119,7 @@ V3.1.1 公网收尾已完成；其后才进入 V4 横线纸自动检测与文字
 - Typecheck：通过
 - ESLint：0 error
 - Build：production build 通过
+- Cloudflare Pages 静态导出：通过；4 个正式路由均生成到 `out/`，生产 API 地址已写入浏览器产物
 - FastAPI health：通过，`status=ok`、`version=3.1.1`
 - Golden Test：Raw 3657 / Laid out 3657 / Missing 0；实际 Canvas `fillText` 覆盖率通过
 - 公网 DOCX：合成长文档 Raw 3097，DocumentBlock 5，弃用字段映射结果 0
@@ -153,10 +154,10 @@ V3.1 本轮完整源码测试已通过；正式 ZIP 与 clean-room 将在部署�
 
 ## 当前公网地址
 
-- Frontend：`https://handwrite-studio-yu251221wen.fast-drum-0976.chatgpt.site/`
+- Frontend：待 Cloudflare Pages 授权和部署；旧 `chatgpt.site` 因移动网络 Cloudflare block 不再作为正式入口
 - API：`https://handwrite-studio-api-production.up.railway.app`
 - Health：`https://handwrite-studio-api-production.up.railway.app/health`（HTTP 200，`status=ok`、`version=3.1.1`、`environment=production`）
-- Showcase：`https://handwrite-studio-yu251221wen.fast-drum-0976.chatgpt.site/showcase`
+- Showcase：待新 `*.pages.dev/showcase/` 地址生成
 
 ---
 
@@ -164,14 +165,15 @@ V3.1 本轮完整源码测试已通过；正式 ZIP 与 clean-room 将在部署�
 
 Railway FastAPI production 后端已部署成功：服务 `handwrite-studio-api`，V3.1.1 实现提交 `8efd99cd2892f526eda2a3a2deb21d4693862bb6`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。Render 因绑卡要求停用。
 
-Sites 前端 V3.1.1 已公开发布，生产构建使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app`。Railway 同时配置 HTTPS `PUBLIC_API_BASE_URL`；`ALLOWED_ORIGINS` 精确设置为正式前端 Origin，不使用通配符。
+Cloudflare Pages 静态部署配置已准备并完成本地构建验证，等待用户完成 Cloudflare 账号登录/授权后创建标准 Pages 项目。生产构建使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app`。获得新域名后，必须把 Railway `ALLOWED_ORIGINS` 更新为新的精确 HTTPS Origin；当前值仍是已停用的旧前端 Origin。
 
 ---
 
 ## 当前已知问题
 
 - Cloudflare / Vite 开发运行时可能在类型初始化时出现 `fetch failed` / `ECONNRESET`；production build 和本地生产预览稳定
-- 当前本机代理访问 `chatgpt.site` 偶发 `ERR_CONNECTION_CLOSED`；V3.1.1 四个正式路由已分别取得 HTTPS 200，Sites 部署状态为 `succeeded`，本地同构建已完成浏览器 UI 验收
+- 旧 `chatgpt.site` 在手机移动网络触发 Cloudflare block，已停止作为正式公网入口
+- Cloudflare Pages 尚待账号登录/授权，新的 `pages.dev` 域名和公网端到端验收尚未完成
 - 旧字段布局引擎与字段映射模块仍作为迁移兼容源码保留，但没有正式运行入口
 - 自动排版后手工改页次可保存，但再次全局重排会重建自动页顺序
 - 跨软件关闭的草稿恢复受浏览器 Session 生命周期限制，应使用项目 JSON

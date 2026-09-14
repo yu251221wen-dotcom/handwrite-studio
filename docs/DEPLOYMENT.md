@@ -2,7 +2,7 @@
 
 ## 目标拓扑
 
-- 前端：Cloudflare Sites/Vinext，正式 HTTPS。
+- 前端：Cloudflare Pages 标准静态项目，正式 `*.pages.dev` HTTPS。
 - API：Railway Docker Web Service，正式 HTTPS。
 - 本地版：继续使用 `localhost:5173` 与 `127.0.0.1:8000`。
 
@@ -19,10 +19,18 @@ API 不需要数据库。默认使用临时磁盘保存匿名 Session；文件�
 
 ## 前端部署
 
-1. 构建前设置 `NEXT_PUBLIC_API_BASE_URL=https://实际API域名`。
-2. 执行 `pnpm install --frozen-lockfile` 与 `pnpm build`。
-3. 通过项目现有 `.openai/hosting.json` 与 Sites 发布流程部署构建产物。
-4. 获得前端 URL 后，把 Railway 的 `ALLOWED_ORIGINS` 精确更新为该 URL 并重新部署 API。
+当前页面全部可静态生成，DOCX、字体、背景、项目与 PDF 等业务请求在浏览器中直接访问 Railway API。Cloudflare Pages 使用独立静态构建入口，不改变本地/Vinext 构建。
+
+1. 在 Cloudflare Dashboard 创建 Pages 项目并连接 GitHub 仓库 `yu251221wen-dotcom/handwrite-studio`。
+2. Production branch 设置为 `main`。
+3. Framework preset 选择 `Next.js (Static HTML Export)`。
+4. Build command 设置为 `pnpm build:pages`。
+5. Build output directory 设置为 `out`。
+6. Root directory 留空（仓库根目录）。
+7. 环境变量设置 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app`；如平台未自动选择 Node 22，再设置 `NODE_VERSION=22.16.0`。
+8. 获得 `https://<project>.pages.dev` 后，把 Railway 的 `ALLOWED_ORIGINS` 精确更新为该 Origin 并重新部署 API。
+
+静态导出由 `HANDWRITE_STATIC_EXPORT=1` 条件启用；只有 `pnpm build:pages` 使用它。普通 `pnpm build`、`pnpm dev` 与 FastAPI 后端不受影响。
 
 生产构建不得保留 localhost API。代码中的本地地址只存在于统一 API client 的开发默认值和 `.env.example`，React 组件不硬编码 API。
 
