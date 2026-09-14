@@ -8,7 +8,7 @@
 
 ## 当前版本
 
-- Version：3.1.0（V3.1）
+- Version：3.1.1（V3.1.1）
 - SchemaVersion：3
 - 更新日期：2026-09-14
 - GitHub：`https://github.com/yu251221wen-dotcom/handwrite-studio`
@@ -73,6 +73,10 @@
 - [x] coverage validator
 - [x] session isolation
 - [x] /health
+- [x] 公网字体/背景 HTTPS 资源链路
+- [x] 失效匿名 Session 自动刷新一次
+- [x] 长段落剩余页空间利用优化
+- [x] 固定标题栏与三栏独立滚动
 - [x] Template Mapping production path removed / disabled
 - [ ] V3.1 clean-room
 
@@ -92,35 +96,37 @@
 
 ## 当前最高优先级
 
-当前阶段：V3.1 公网交付完成
+当前阶段：V3.1.1 公网收尾完成
 
 1. 保持 Frontend / API / Showcase 公网地址可用
 2. 保持 Session isolation、精确 CORS 和 `/health`
 3. 保持 Golden Test Missing = 0
-4. 不破坏当前 V3.1 功能
+4. 不破坏当前 V3.1.1 功能
 5. 后续按路线进入 V4，不提前开发 OCR、透视或 AI 字形
 
 ---
 
 ## 下一阶段
 
-当前先完成 V3.1 正式公网部署；其后才进入 V4 横线纸自动检测与文字基线吸附。暂时不要提前开发 OCR、透视或 AI 字形。
+V3.1.1 公网收尾已完成；其后才进入 V4 横线纸自动检测与文字基线吸附。暂时不要提前开发 OCR、透视或 AI 字形。
 
 ---
 
 ## 最近测试结果
 
-- TypeScript：23 / 23 通过
+- TypeScript：25 / 25 通过
 - Python：16 / 16 通过
 - Typecheck：通过
 - ESLint：0 error
 - Build：production build 通过
-- FastAPI health：通过，`status=ok`、`version=3.1.0`
+- FastAPI health：通过，`status=ok`、`version=3.1.1`
 - Golden Test：Raw 3657 / Laid out 3657 / Missing 0；实际 Canvas `fillText` 覆盖率通过
 - 公网 DOCX：合成长文档 Raw 3097，DocumentBlock 5，弃用字段映射结果 0
 - 公网 Session isolation：同一项目 Session A 读取 200，Session B 读取 404
 - 公网 CORS：正式前端 Origin 允许，预检 200，`X-Session-ID` 已允许
+- 公网资源：TTF 与合成 PNG 上传成功；返回 URL 为直接 HTTPS；文件响应 200 且 CORS 精确匹配正式前端
 - 公网 PDF：三张 2480 × 3508 页面导出 HTTP 200，实测 PDF 3 页、A4 MediaBox
+- UI：body 不滚动，标题栏固定；左/右栏独立滚动；字体 30 资源位、背景 30 预设均可见；控制台 0 error/warning
 - Clean-room：V3.0 最近一次通过；V3.1 尚未重新打包和执行 clean-room
 
 V3.1 本轮完整源码测试已通过；正式 ZIP 与 clean-room 将在部署授权和本轮交付打包时更新。
@@ -129,7 +135,7 @@ V3.1 本轮完整源码测试已通过；正式 ZIP 与 clean-room 将在部署�
 
 ## 当前 Golden 输出
 
-- Preserve structure pages：11
+- Preserve structure pages：10（V3.1.1 前为 11；减少可避免页尾空白）
 - Simplified pages：10
 - 300 DPI：2480 × 3508 px
 - PDF：真正多页导出链路测试通过；页数与 `pages.length` 一致
@@ -138,10 +144,10 @@ V3.1 本轮完整源码测试已通过；正式 ZIP 与 clean-room 将在部署�
 
 ## 当前本地地址
 
-- Frontend：V3.1 未启动；`http://localhost:5173/` 当前仍是旧 V3.0 clean-room 实例
-- Showcase：V3.1 未启动；现有 5173 Showcase 仍是旧实例
-- Backend：V3.1 验收进程已停止；`http://127.0.0.1:8000` 当前仍是旧 V3.0 实例
-- Health：V3.1 已在隔离端口验证 `status=ok`、`version=3.1.0` 后停止
+- Frontend：V3.1.1 已在 `http://localhost:5173/` 完成 UI 验收
+- Showcase：V3.1.1 可由 `http://localhost:5173/showcase` 验收
+- Backend：V3.1.1 已在 `http://127.0.0.1:8000` 完成隔离测试
+- Health：本地与公网均验证 `status=ok`、`version=3.1.1`
 
 ---
 
@@ -149,23 +155,23 @@ V3.1 本轮完整源码测试已通过；正式 ZIP 与 clean-room 将在部署�
 
 - Frontend：`https://handwrite-studio-yu251221wen.fast-drum-0976.chatgpt.site/`
 - API：`https://handwrite-studio-api-production.up.railway.app`
-- Health：`https://handwrite-studio-api-production.up.railway.app/health`（HTTP 200，`status=ok`、`version=3.1.0`、`environment=production`）
+- Health：`https://handwrite-studio-api-production.up.railway.app/health`（HTTP 200，`status=ok`、`version=3.1.1`、`environment=production`）
 - Showcase：`https://handwrite-studio-yu251221wen.fast-drum-0976.chatgpt.site/showcase`
 
 ---
 
 ## 当前部署状态
 
-Railway FastAPI production 后端已部署成功：服务 `handwrite-studio-api`，GitHub `main` 提交 `b65a4b6441a143b3654d25478d1da5002fa221da`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。Render 因绑卡要求停用。
+Railway FastAPI production 后端已部署成功：服务 `handwrite-studio-api`，V3.1.1 实现提交 `8efd99cd2892f526eda2a3a2deb21d4693862bb6`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。Render 因绑卡要求停用。
 
-Sites 前端已公开发布，生产构建使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app`。Railway `ALLOWED_ORIGINS` 已精确设置为正式前端 Origin，不使用通配符。
+Sites 前端 V3.1.1 已公开发布，生产构建使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app`。Railway 同时配置 HTTPS `PUBLIC_API_BASE_URL`；`ALLOWED_ORIGINS` 精确设置为正式前端 Origin，不使用通配符。
 
 ---
 
 ## 当前已知问题
 
 - Cloudflare / Vite 开发运行时可能在类型初始化时出现 `fetch failed` / `ECONNRESET`；production build 和本地生产预览稳定
-- 当前本机代理访问 `chatgpt.site` 偶发 `ERR_CONNECTION_CLOSED`；同一正式首页与 Showcase 已分别成功完成浏览器渲染，Sites 部署状态为 `succeeded`
+- 当前本机代理访问 `chatgpt.site` 偶发 `ERR_CONNECTION_CLOSED`；V3.1.1 四个正式路由已分别取得 HTTPS 200，Sites 部署状态为 `succeeded`，本地同构建已完成浏览器 UI 验收
 - 旧字段布局引擎与字段映射模块仍作为迁移兼容源码保留，但没有正式运行入口
 - 自动排版后手工改页次可保存，但再次全局重排会重建自动页顺序
 - 跨软件关闭的草稿恢复受浏览器 Session 生命周期限制，应使用项目 JSON

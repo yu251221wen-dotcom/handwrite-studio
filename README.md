@@ -1,6 +1,6 @@
-# 墨迹排版台 V3.1
+# 墨迹排版台 V3.1.1
 
-墨迹排版台是本地优先、可选在线临时会话的通用 DOCX 手写排版器。V3.1 将无模板 DocumentBlock 排版设为唯一正式工作流；原有多页 Canvas、自然手写、字体/背景、逐行编辑、Undo/Redo 与高 DPI 导出均保留。
+墨迹排版台是本地优先、可选在线临时会话的通用 DOCX 手写排版器。V3.1.1 延续无模板 DocumentBlock 唯一正式工作流，并完成公网字体/背景资源链路、长段落分页利用率和三栏独立滚动收尾；原有多页 Canvas、自然手写、逐行编辑、Undo/Redo 与高 DPI 导出均保留。
 
 ## Development Context
 
@@ -15,11 +15,11 @@ Before modifying this project, read:
 
 Do not duplicate long-term requirements in each development prompt.
 
-## V3.1 功能
+## V3.1.1 功能
 
 - 排版方式：统一使用 `no-template`；默认“保留原文结构”，另有“简化正文”。
 - DocumentBlock：Heading、Paragraph、KeyValue、List、Table、Prescription、Signature，均保存原文顺序和来源区间。
-- Block-aware 分页：标题与下文同页、段落拆分、表格按行、中药按 item/row、签名尽量整体保留，并提供基础 widow/orphan 控制。
+- Block-aware 分页：标题与下文同页、长段落优先使用当前页剩余空间、表格按行、中药按 item/row、签名尽量整体保留，并提供基础 widow/orphan 控制。
 - 页面管理：新增空白页、复制、上下移动、拖拽排序、安全删除；页面变更进入统一 Undo/Redo 历史。
 - 页面级 `pageType`、`pageTemplateId`、背景、Fit/Cover/Stretch 和变换参数均可保存恢复。
 - 旧固定病历模板和 mapped/unmapped 状态仅保留 JSON 迁移兼容，正式 UI、DOCX API 和布局路由均不再调用。
@@ -40,7 +40,7 @@ Do not duplicate long-term requirements in each development prompt.
 ## 隐私与在线会话
 
 - 本地隐私模式不调用第三方 AI，也不采集正文 Analytics。
-- 在线模式先创建 128-bit 随机匿名 Session；文档解析、字体、背景、项目和临时导出按 Session 目录隔离。
+- 在线模式先创建 128-bit 随机匿名 Session；文档解析、字体、背景、项目和临时导出按 Session 目录隔离。服务重启导致匿名 Session 失效时，前端会重新建会话并重试一次。
 - 原 DOCX 只在请求内存中解析，不写浏览器持久存储；临时目录默认 24 小时过期。
 - 上传检查扩展名、MIME、大小和文件签名，服务端资源使用 UUID 文件名。
 - 公网 Showcase 只使用 `lib/demo` 中的脱敏合成内容；真实 cardiology fixture 仅位于 `tests/fixtures`，不会进入 `public` 或 Showcase bundle。
@@ -90,7 +90,7 @@ pnpm build
 
 ## 部署
 
-前端沿用现有 Vinext/Cloudflare Sites 构建，FastAPI 使用 `Dockerfile.api` 与 `render.yaml` 部署。生产环境必须设置真实 `NEXT_PUBLIC_API_BASE_URL` 与精确 `ALLOWED_ORIGINS`，不得使用通配 CORS。详见 [部署说明](docs/DEPLOYMENT.md) 和 [V3 架构](docs/V3-ARCHITECTURE.md)。
+前端沿用现有 Vinext/Cloudflare Sites 构建，FastAPI 使用 `Dockerfile.api` 部署到 Railway。生产环境必须设置真实 `NEXT_PUBLIC_API_BASE_URL`、HTTPS `PUBLIC_API_BASE_URL` 与精确 `ALLOWED_ORIGINS`，不得使用通配 CORS。详见 [部署说明](docs/DEPLOYMENT.md) 和 [V3 架构](docs/V3-ARCHITECTURE.md)。
 
 ## 本轮明确暂缓
 
