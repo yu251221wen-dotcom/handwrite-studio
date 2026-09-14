@@ -1,0 +1,14 @@
+node_modules
+.venv
+.git
+data
+tests/fixtures
+dist
+.next
+.vinext
+.wrangler
+build
+outputs
+work
+*.tsbuildinfo
+.env*

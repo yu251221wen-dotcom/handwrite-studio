@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: handwrite-studio-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.api
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: UPLOAD_DIR
+        value: /tmp/handwrite-studio-sessions
+      - key: TEMP_FILE_TTL_HOURS
+        value: 24
+      - key: MAX_UPLOAD_SIZE_MB
+        value: 20

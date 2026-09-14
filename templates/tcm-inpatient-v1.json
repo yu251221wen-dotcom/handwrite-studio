@@ -1,0 +1,19 @@
+{
+  "id": "tcm-inpatient-v1",
+  "name": "中医住院病历",
+  "version": 1,
+  "source": "格式.docx",
+  "page": { "widthMm": 210, "heightMm": 297, "backgroundAsset": null, "baselineMode": "fixed" },
+  "fields": [
+    { "id": "name", "label": "姓名", "aliases": ["患者姓名"], "kind": "text", "region": { "x": 20, "y": 46, "width": 70, "height": 8 } },
+    { "id": "record_number", "label": "病案号", "aliases": ["住院号"], "kind": "text", "region": { "x": 112, "y": 46, "width": 75, "height": 8 } },
+    { "id": "chief_complaint", "label": "主诉", "aliases": [], "kind": "paragraph", "region": { "x": 20, "y": 88, "width": 170, "height": 18 }, "layout": { "fontSize": 16, "lineHeight": 8, "letterSpacing": 0.08, "wrap": true, "overflow": "nextPage" } },
+    { "id": "present_illness", "label": "现病史", "aliases": ["现病情况"], "kind": "paragraph", "region": { "x": 20, "y": 108, "width": 170, "height": 48 }, "layout": { "fontSize": 16, "lineHeight": 8, "letterSpacing": 0.08, "wrap": true, "overflow": "nextPage" } },
+    { "id": "past_history", "label": "既往史", "aliases": [], "kind": "paragraph", "region": { "x": 20, "y": 158, "width": 170, "height": 24 }, "layout": { "fontSize": 16, "lineHeight": 8, "letterSpacing": 0.08, "wrap": true, "overflow": "nextPage" } },
+    { "id": "personal_history", "label": "个人史", "aliases": [], "kind": "paragraph", "region": { "x": 20, "y": 184, "width": 170, "height": 24 } },
+    { "id": "family_history", "label": "家族史", "aliases": [], "kind": "paragraph", "region": { "x": 20, "y": 210, "width": 170, "height": 20 } },
+    { "id": "physical_exam", "label": "体格检查", "aliases": ["查体"], "kind": "paragraph", "region": { "x": 20, "y": 88, "width": 170, "height": 112 } },
+    { "id": "admission_diagnosis", "label": "入院诊断", "aliases": [], "kind": "paragraph", "region": { "x": 20, "y": 205, "width": 120, "height": 34 } },
+    { "id": "signature", "label": "实习医师签名", "aliases": ["医师签名"], "kind": "signature", "region": { "x": 130, "y": 258, "width": 58, "height": 10 } }
+  ]
+}

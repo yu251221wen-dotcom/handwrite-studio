@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.handwrite.studio/schema/template.json",
+  "title": "Handwrite Studio Template",
+  "type": "object",
+  "required": ["id", "name", "version", "page", "fields"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "version": { "type": "integer", "minimum": 1 },
+    "page": {
+      "type": "object",
+      "required": ["widthMm", "heightMm"],
+      "properties": {
+        "widthMm": { "type": "number", "minimum": 1 },
+        "heightMm": { "type": "number", "minimum": 1 },
+        "backgroundAsset": { "type": ["string", "null"] },
+        "baselineMode": { "enum": ["free", "fixed", "detected"] }
+      },
+      "additionalProperties": false
+    },
+    "fields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "kind", "region"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "aliases": { "type": "array", "items": { "type": "string" } },
+          "kind": { "enum": ["text", "paragraph", "date", "number", "signature"] },
+          "region": {
+            "type": "object",
+            "required": ["x", "y", "width", "height"],
+            "properties": {
+              "x": { "type": "number" }, "y": { "type": "number" },
+              "width": { "type": "number", "exclusiveMinimum": 0 },
+              "height": { "type": "number", "exclusiveMinimum": 0 }
+            },
+            "additionalProperties": false
+          },
+          "layout": {
+            "type": "object",
+            "properties": {
+              "fontSize": { "type": "number", "minimum": 6 },
+              "lineHeight": { "type": "number", "minimum": 6 },
+              "letterSpacing": { "type": "number" },
+              "wrap": { "type": "boolean" },
+              "overflow": { "enum": ["clip", "shrink", "nextPage"] }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

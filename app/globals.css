@@ -1,0 +1,102 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "../vendor/shadcn-tailwind-4.13.0.css";
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #b9c4c8 transparent;
+}
+
+:root {
+  --background: #f3f6f8;
+  --foreground: #17262f;
+  --card: #ffffff;
+  --card-foreground: #17262f;
+  --popover: #ffffff;
+  --popover-foreground: #17262f;
+  --primary: #287e86;
+  --primary-foreground: #ffffff;
+  --secondary: #eef3f4;
+  --secondary-foreground: #27434b;
+  --muted: #e8eef0;
+  --muted-foreground: #71828a;
+  --accent: #e6f3f2;
+  --accent-foreground: #1f6269;
+  --destructive: #c94d3f;
+  --border: #dbe3e6;
+  --input: #dbe3e6;
+  --ring: #51a5aa;
+  --radius: 0.7rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--foreground); }
+button, label { -webkit-tap-highlight-color: transparent; }
+.paper-sheet {
+  background-image:
+    linear-gradient(90deg, transparent 0, transparent 57px, rgba(213, 100, 81, 0.15) 58px, transparent 59px),
+    repeating-linear-gradient(0deg, transparent 0, transparent 47px, rgba(66, 131, 149, 0.1) 48px, transparent 49px),
+    radial-gradient(circle at 20% 15%, rgba(114, 91, 60, 0.035), transparent 38%);
+}
+.handwriting {
+  font-family: "STXingkai", "KaiTi", "Kaiti SC", "FangSong", serif;
+  font-weight: 500;
+}
+.line-selected {
+  outline: 1.5px solid rgba(40, 126, 134, 0.6);
+  background: rgba(230, 247, 246, 0.78);
+}
+.line-selected::before,
+.line-selected::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #287e86;
+  background: white;
+  transform: translateY(-50%);
+}
+.line-selected::before { left: -4px; }
+.line-selected::after { right: -4px; }
+
+.paper-canvas canvas { image-rendering: auto; }
+.resource-grid { scrollbar-width: thin; scrollbar-color: #c7d1d5 transparent; }
+
+@media (max-width: 760px) {
+  .paper-sheet, .paper-canvas { transform: scale(0.72); transform-origin: top center; margin-bottom: -235px; }
+}
+
+@media print {
+  body * { visibility: hidden; }
+  .paper-canvas, .paper-canvas * { visibility: visible; }
+  .paper-canvas { position: fixed !important; inset: 0 auto auto 0 !important; box-shadow: none !important; transform: none !important; }
+  .line-selected { outline: none; background: transparent; }
+  .line-selected::before, .line-selected::after { display: none; }
+}

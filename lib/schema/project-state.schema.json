@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://handwrite.studio/schema/project-state-v3.json",
+  "title": "Handwrite Studio Project State V3",
+  "type": "object",
+  "required": [
+    "schemaVersion", "projectVersion", "id", "document", "layoutMode", "noTemplateMode",
+    "documentBlocks", "mappedBlockIds", "unmappedBlockIds", "explicitlyIgnoredBlockIds",
+    "documentLayoutSettings", "seed", "selectedFontId", "fieldMappings", "pages",
+    "handwriting", "exportSettings", "updatedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 3 },
+    "projectVersion": { "type": "string" },
+    "id": { "type": "string" },
+    "document": {
+      "type": "object",
+      "required": ["id", "name", "rawTexts", "sourceCharacterCount"],
+      "properties": {
+        "id": { "type": "string" }, "name": { "type": "string" },
+        "rawTexts": { "type": "array", "items": { "type": "string" } },
+        "sourceCharacterCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "layoutMode": { "enum": ["no-template", "template"], "$comment": "template is accepted only for legacy V3 import and is normalized to no-template" },
+    "noTemplateMode": { "enum": ["preserve-structure", "simplified"] },
+    "templateId": { "type": ["string", "null"] },
+    "documentBlocks": { "type": "array", "items": { "$ref": "#/$defs/documentBlock" } },
+    "mappedBlockIds": { "type": "array", "items": { "type": "string" }, "$comment": "deprecated compatibility field; V3.1 writes an empty array" },
+    "unmappedBlockIds": { "type": "array", "items": { "type": "string" }, "$comment": "deprecated compatibility field; V3.1 writes an empty array" },
+    "explicitlyIgnoredBlockIds": { "type": "array", "items": { "type": "string" } },
+    "documentLayoutSettings": { "type": "object" },
+    "seed": { "type": "string" },
+    "selectedFontId": { "type": "string" },
+    "fieldMappings": { "type": "array", "items": { "$ref": "#/$defs/fieldMapping" } },
+    "pages": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/page" } },
+    "handwriting": { "type": "object" },
+    "exportSettings": { "type": "object" },
+    "updatedAt": { "type": "string" }
+  },
+  "$defs": {
+    "documentBlock": {
+      "type": "object",
+      "required": ["blockId", "type", "sourceOrder", "sourceStart", "sourceEnd", "sourceText"],
+      "properties": {
+        "blockId": { "type": "string" },
+        "type": { "enum": ["heading", "paragraph", "key-value", "list", "table", "prescription", "signature"] },
+        "sourceOrder": { "type": "integer", "minimum": 0 },
+        "sourceStart": { "type": "integer", "minimum": 0 },
+        "sourceEnd": { "type": "integer", "minimum": 0 },
+        "sourceText": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "fieldMapping": {
+      "type": "object",
+      "required": ["id", "label", "value", "sourceText", "confidence", "confirmed", "role"],
+      "properties": {
+        "id": { "type": "string" }, "label": { "type": "string" }, "value": { "type": "string" },
+        "sourceText": { "type": "string" }, "confidence": { "type": "number" },
+        "confirmed": { "type": "boolean" }, "role": { "enum": ["patient", "body"] },
+        "sourceBlockIds": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "line": {
+      "type": "object",
+      "properties": {
+        "sourceCharacterIndices": { "type": "array", "items": { "type": "integer", "minimum": -1 } }
+      },
+      "required": ["id", "pageId", "fieldId", "label", "text", "startIndex", "endIndex", "autoX", "autoY", "manualOffsetX", "manualOffsetY", "rotation", "fontSize", "letterSpacing", "lineHeight", "fontId", "locked"]
+    },
+    "page": {
+      "type": "object",
+      "required": ["pageId", "pageIndex", "templateId", "widthMm", "heightMm", "backgroundId", "backgroundAdjustments", "backgroundTransform", "lines"],
+      "properties": {
+        "pageId": { "type": "string" }, "pageIndex": { "type": "integer", "minimum": 0 },
+        "pageType": { "enum": ["first", "continuation", "blank", "custom"] },
+        "pageTemplateId": { "type": ["string", "null"] }, "templateId": { "type": "string" },
+        "widthMm": { "const": 210 }, "heightMm": { "const": 297 }, "backgroundId": { "type": "string" },
+        "backgroundAdjustments": { "type": "object" }, "backgroundTransform": { "type": "object" },
+        "blockIds": { "type": "array", "items": { "type": "string" } },
+        "lines": { "type": "array", "items": { "$ref": "#/$defs/line" } }
+      }
+    }
+  },
+  "additionalProperties": false
+}

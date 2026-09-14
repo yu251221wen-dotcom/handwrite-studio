@@ -1,0 +1,13 @@
+{
+  "id": "tcm-inpatient-v2",
+  "name": "中医住院病历",
+  "version": 2,
+  "source": "格式.docx",
+  "page": { "widthMm": 210, "heightMm": 297 },
+  "templates": {
+    "firstPage": { "id": "tcm-inpatient-first-v2", "content": { "left": 61, "right": 535, "top": 286, "bottom": 752 } },
+    "continuation": { "id": "tcm-inpatient-continuation-v2", "content": { "left": 61, "right": 535, "top": 168, "bottom": 752 }, "repeatFieldLabel": false }
+  },
+  "patientFields": ["name", "sex", "age", "occupation", "admission_time", "medical_record_number"],
+  "bodyFields": ["chief_complaint", "present_illness", "past_history", "personal_history", "allergy_history", "marital_history", "family_history", "physical_exam", "specialty_exam", "laboratory_exam", "admission_diagnosis", "tcm_evidence", "western_evidence"]
+}

@@ -1,0 +1,103 @@
+# 墨迹排版台 V3.1
+
+墨迹排版台是本地优先、可选在线临时会话的通用 DOCX 手写排版器。V3.1 将无模板 DocumentBlock 排版设为唯一正式工作流；原有多页 Canvas、自然手写、字体/背景、逐行编辑、Undo/Redo 与高 DPI 导出均保留。
+
+## Development Context
+
+Before modifying this project, read:
+
+1. `AGENTS.md`
+2. `PROJECT_STATUS.md`
+
+`AGENTS.md` contains long-term project rules.
+
+`PROJECT_STATUS.md` contains the current implementation state and next task.
+
+Do not duplicate long-term requirements in each development prompt.
+
+## V3.1 功能
+
+- 排版方式：统一使用 `no-template`；默认“保留原文结构”，另有“简化正文”。
+- DocumentBlock：Heading、Paragraph、KeyValue、List、Table、Prescription、Signature，均保存原文顺序和来源区间。
+- Block-aware 分页：标题与下文同页、段落拆分、表格按行、中药按 item/row、签名尽量整体保留，并提供基础 widow/orphan 控制。
+- 页面管理：新增空白页、复制、上下移动、拖拽排序、安全删除；页面变更进入统一 Undo/Redo 历史。
+- 页面级 `pageType`、`pageTemplateId`、背景、Fit/Cover/Stretch 和变换参数均可保存恢复。
+- 旧固定病历模板和 mapped/unmapped 状态仅保留 JSON 迁移兼容，正式 UI、DOCX API 和布局路由均不再调用。
+- Block-aware coverage 显示 Raw、Recognized、Laid out、Ignored、Missing；验收要求 Missing = 0。
+- 文档布局设置：A4 页边距、字号、行距、字距、段距、首行缩进、标题字号、基本信息列数和处方列数。
+- `schemaVersion: 3`；支持 V1→V2→V3 和 V2→V3 迁移。
+- 自动保存只写当前匿名会话的解析后 ProjectState，不保存原 DOCX 二进制。
+
+## 继续保留的 V2 能力
+
+- 双层 Canvas：背景与文字独立。
+- 字符级水平/垂直偏移、旋转、字号、宽高、基线、深浅和低频连续趋势。
+- 同文档、同字体、同参数、同 Seed 完全复现；随机 key 不依赖页码、坐标或背景。
+- 逐行选择、拖动、锁定，以及 X/Y、字号、字距、旋转和行距调整。
+- 30 个字体资源位、TTF/OTF 上传；30 种程序化纸张和 JPG/JPEG/PNG 上传。
+- 150/300/600 DPI PNG/JPG；A4 300 DPI 为 2480×3508；FastAPI 合成真正多页 PDF。
+
+## 隐私与在线会话
+
+- 本地隐私模式不调用第三方 AI，也不采集正文 Analytics。
+- 在线模式先创建 128-bit 随机匿名 Session；文档解析、字体、背景、项目和临时导出按 Session 目录隔离。
+- 原 DOCX 只在请求内存中解析，不写浏览器持久存储；临时目录默认 24 小时过期。
+- 上传检查扩展名、MIME、大小和文件签名，服务端资源使用 UUID 文件名。
+- 公网 Showcase 只使用 `lib/demo` 中的脱敏合成内容；真实 cardiology fixture 仅位于 `tests/fixtures`，不会进入 `public` 或 Showcase bundle。
+
+## 包管理器
+
+项目统一使用 `pnpm 11.19.0`，以 `pnpm-lock.yaml` 为唯一 lock 文件。
+
+## 本地启动
+
+需要 Node.js 22.13+ 和 Python 3.11+。复制 `.env.example` 为 `.env.local`（前端）并在后端进程设置同名服务端变量；默认值可直接用于本机开发。
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+另开一个 PowerShell：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r server\requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn server.main:app --host 127.0.0.1 --port 8000
+```
+
+- 编辑器：`http://localhost:5173/`
+- V3 Showcase：`http://localhost:5173/showcase`
+- FastAPI health：`http://127.0.0.1:8000/health`
+
+## 测试
+
+先创建 `.venv` 并安装 Python 依赖。TypeScript Golden 测试会调用当前项目自己的 Python 解析器；HTTP 验收会启动独立临时 API 进程。Python 版本通过 `server/requirements-lock.txt` 锁定。
+
+```powershell
+pnpm test
+pnpm typecheck
+pnpm lint
+pnpm build
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+真实 Golden fixture 使用 ASCII 文件名 `tests/fixtures/cardiology-inpatient-record.docx`。它只用于获授权的本地测试和最终源码包，不会发布到公网静态目录。
+
+## 字体版权
+
+30 个字体资源位由 4 个本机系统字体引用和 26 个用户自定义槽位组成。项目不捆绑来源或授权不明确的中文手写字体。用户上传字体按 Session 保存，不会成为其他用户的字体。
+
+## 部署
+
+前端沿用现有 Vinext/Cloudflare Sites 构建，FastAPI 使用 `Dockerfile.api` 与 `render.yaml` 部署。生产环境必须设置真实 `NEXT_PUBLIC_API_BASE_URL` 与精确 `ALLOWED_ORIGINS`，不得使用通配 CORS。详见 [部署说明](docs/DEPLOYMENT.md) 和 [V3 架构](docs/V3-ARCHITECTURE.md)。
+
+## 本轮明确暂缓
+
+2026-09-13 字符漏绘修复：Block 行保存 `sourceCharacterIndices`，布局分列符不消耗原文字迹状态；旧 V3 JSON 打开时补充该索引，不移动已有行。状态不足或索引损坏时绘制/导出明确报错，不再静默导出残缺图片。Golden 测试直接记录 Canvas `fillText` 调用，逐页校验实际绘出的字符，而不仅比较排版元数据。
+
+完整性检查比较实际行文本，不使用映射标记或原文副本代替最终绘制内容；发现缺失或损坏会阻止导出。
+
+当前限制：自动排版后手工改页次可保存，但再次全局重排会重建自动页顺序；跨软件关闭的草稿恢复受浏览器 Session 生命周期限制，请使用保存 JSON；字体依赖本机已安装字体或用户上传，跨设备应上传同一字体以保持视觉一致。高 DPI 导出按页串行绘制，耗时与页数相关。
+
+OCR、PaddleOCR、扫描 PDF OCR、AI/LLM 字段匹配、自动横线检测、Hough Transform、自动透视校正、四角透视拖拽、SVG Path 笔画扰动、自动涂改、圈画与 AI 生成笔迹仍未实现。
