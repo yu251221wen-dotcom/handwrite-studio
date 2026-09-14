@@ -13,7 +13,7 @@ from server.modules.document_parser import DocxParseError, parse_docx
 from server.resource_store import ResourceError, ResourceStore
 from server.session_store import InvalidSession, SessionStore
 
-VERSION = "3.1.0"
+VERSION = "3.1.1"
 FONT_LIMIT_BYTES = min(settings.max_upload_bytes, 32 * 1024 * 1024)
 BACKGROUND_LIMIT_BYTES = min(settings.max_upload_bytes, 25 * 1024 * 1024)
 sessions = SessionStore(settings.upload_dir, settings.temp_file_ttl_hours)
@@ -47,7 +47,7 @@ def _session_id(session_id: str | None) -> str:
 
 
 def _base_url(request: Request) -> str:
-    return str(request.base_url).rstrip("/")
+    return settings.public_api_base_url or str(request.base_url).rstrip("/")
 
 
 def _asset_url(item: dict, request: Request, session_id: str, kind: str) -> dict:

@@ -170,15 +170,47 @@ export function layoutDocumentBlocks(input: BlockLayoutInput): { pages: PageStat
     if ((requiredWithNext && availableLines < requiredWithNext) || (!unit.allowSplit && availableLines < unit.lines.length) ||
         (availableLines > 0 && availableLines < input.settings.minLinesAtPageBottom && unit.lines.length > availableLines)) nextPage();
     y += unit.spacingBefore;
-    for (let lineIndex = 0; lineIndex < unit.lines.length; lineIndex += 1) {
-      const logical = restoreManual(unit.lines[lineIndex], previousLines);
+    const fullUnitHeight = unit.lines.reduce((sum, line) => sum + restoreManual(line, previousLines).lineHeight, 0);
+    let lineIndex = 0;
+    while (lineIndex < unit.lines.length) {
+      let fitCount = 0;
+      let fittedHeight = 0;
+      for (let index = lineIndex; index < unit.lines.length; index += 1) {
+        const candidate = restoreManual(unit.lines[index], previousLines);
+        if (y + fittedHeight + candidate.lineHeight > bottom) break;
+        fittedHeight += candidate.lineHeight;
+        fitCount += 1;
+      }
+
+      if (fitCount === 0) {
+        if (y > top) { nextPage(); continue; }
+        // A single manually enlarged line may be taller than the content area.
+        // Place it once instead of entering a pagination loop.
+        fitCount = 1;
+      }
+
       const remaining = unit.lines.length - lineIndex;
-      if (y + logical.lineHeight > bottom) nextPage();
-      const slots = Math.floor((bottom - y) / Math.max(1, logical.lineHeight));
-      if (slots > 0 && remaining > slots && remaining - slots < input.settings.minLinesAtPageTop) nextPage();
-      const line = { ...logical, pageId: page.pageId, autoY: y };
-      page.lines.push(line); if (!page.blockIds!.includes(unit.block.blockId)) page.blockIds!.push(unit.block.blockId);
-      y += logical.lineHeight;
+      let take = Math.min(fitCount, remaining);
+      if (remaining > take) {
+        const canSplit = unit.allowSplit || fullUnitHeight > bottom - top;
+        if (!canSplit) { nextPage(); continue; }
+
+        // Keep a small continuation at the top of the following page, but consume
+        // the current page instead of moving the entire long paragraph forward.
+        const minNext = Math.min(input.settings.minLinesAtPageTop, remaining - 1);
+        take = Math.min(take, remaining - minNext);
+        const minCurrent = Math.min(input.settings.minLinesAtPageBottom, remaining - minNext);
+        if (take < minCurrent && y > top) { nextPage(); continue; }
+      }
+
+      for (let offset = 0; offset < take; offset += 1) {
+        const logical = restoreManual(unit.lines[lineIndex], previousLines);
+        const line = { ...logical, pageId: page.pageId, autoY: y };
+        page.lines.push(line); if (!page.blockIds!.includes(unit.block.blockId)) page.blockIds!.push(unit.block.blockId);
+        y += logical.lineHeight;
+        lineIndex += 1;
+      }
+      if (lineIndex < unit.lines.length) nextPage();
     }
     y += unit.spacingAfter;
   }

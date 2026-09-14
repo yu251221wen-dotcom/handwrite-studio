@@ -13,7 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { API_BASE_URL, apiFetch, getSessionId } from "@/lib/api/client";
+import { API_BASE_URL, apiFetch, apiJson, getSessionId } from "@/lib/api/client";
 import { DEMO_DOCUMENT_NAME, DEMO_INITIAL_FIELDS } from "@/lib/demo/medical-record-fixture";
 import { BACKGROUND_PRESETS } from "@/lib/handwriting/background-library";
 import { A4_PIXELS, renderCompositeCanvas, type RenderOptions } from "@/lib/handwriting/canvas-renderer";
@@ -46,7 +46,7 @@ function makeProject(fields = DEMO_INITIAL_FIELDS, name = DEMO_DOCUMENT_NAME, ra
   const font = FONT_SLOTS.find((item) => item.id === fontId) ?? FONT_SLOTS[0];
   const demo = demoBlocks(fields); const documentId = documentFingerprint(demo.fields);
   const base: ProjectState = {
-    schemaVersion: 3, projectVersion: "3.1.0", id: previous?.id ?? "current",
+    schemaVersion: 3, projectVersion: "3.1.1", id: previous?.id ?? "current",
     document: { id: documentId, name, rawTexts, sourceCharacterCount: fields.reduce((sum, field) => sum + Array.from(field.value).length, 0) },
     layoutMode: "no-template", noTemplateMode: previous?.noTemplateMode ?? "preserve-structure",
     templateId: null, documentBlocks: demo.blocks,
@@ -87,6 +87,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   const [advanced, setAdvanced] = useState(false);
   const [zoom, setZoom] = useState(0.82);
   const [parseStatus, setParseStatus] = useState("已载入示例内容");
+  const [resourceError, setResourceError] = useState("");
   const [exportStatus, setExportStatus] = useState("");
   const [saveStatus, setSaveStatus] = useState("未保存");
   const [autosaveKey, setAutosaveKey] = useState("");
@@ -109,12 +110,11 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   ]), [project.fieldMappings, project.documentBlocks]);
 
   useEffect(() => {
-    Promise.all([apiFetch("/api/fonts").then((r) => r.ok ? r.json() : []), apiFetch("/api/backgrounds").then((r) => r.ok ? r.json() : [])])
-      .then(async (resources) => {
-        const [uploadedFonts, uploadedBackgrounds] = resources as [FontAsset[], BackgroundAsset[]];
+    Promise.all([apiJson<FontAsset[]>("/api/fonts"), apiJson<BackgroundAsset[]>("/api/backgrounds")])
+      .then(async ([uploadedFonts, uploadedBackgrounds]) => {
         for (const item of uploadedFonts) { try { await loadUploadedFont(item); } catch { /* resource stays visible */ } }
-        setFonts([...uploadedFonts, ...FONT_SLOTS]); setBackgrounds([...uploadedBackgrounds, ...BACKGROUND_PRESETS]);
-      }).catch(() => undefined);
+        setFonts([...uploadedFonts, ...FONT_SLOTS]); setBackgrounds([...uploadedBackgrounds, ...BACKGROUND_PRESETS]); setResourceError("");
+      }).catch((error) => setResourceError(error instanceof Error ? error.message : "字体与背景资源载入失败"));
   }, []);
 
   useEffect(() => { void getSessionId().then((sessionId) => {
@@ -257,19 +257,19 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
     const base = { ...project, pages: deletePageContent(project.pages, pageId), explicitlyIgnoredBlockIds: [...new Set([...project.explicitlyIgnoredBlockIds, ...blockIds])] };
     commitRelayout(base);
   };
-  return <main className="min-h-screen bg-[#f3f6f8] text-slate-900">
-    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-5 backdrop-blur sm:px-7">
-      <div className="flex min-w-0 items-center gap-3"><div className="grid size-9 place-items-center rounded-xl bg-[#153f49] text-white"><FileText className="size-4.5" /></div><div><div className="flex items-center gap-2"><h1 className="text-[15px] font-semibold">墨迹排版台 V3.1</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost") ? "本地隐私模式" : "在线临时会话"}</span></div><p className="max-w-96 truncate text-xs text-slate-400">{project.document.name} · {project.pages.length} 页 · {project.noTemplateMode === "preserve-structure" ? "保留结构" : "简化正文"} · Seed {project.seed} · {saveStatus}</p></div></div>
+  return <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f6f8] text-slate-900">
+    <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white/95 px-5 backdrop-blur sm:px-7">
+      <div className="flex min-w-0 items-center gap-3"><div className="grid size-9 place-items-center rounded-xl bg-[#153f49] text-white"><FileText className="size-4.5" /></div><div><div className="flex items-center gap-2"><h1 className="text-[15px] font-semibold">墨迹排版台 V3.1.1</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost") ? "本地隐私模式" : "在线临时会话"}</span></div><p className="max-w-96 truncate text-xs text-slate-400">{project.document.name} · {project.pages.length} 页 · {project.noTemplateMode === "preserve-structure" ? "保留结构" : "简化正文"} · Seed {project.seed} · {saveStatus}</p></div></div>
       <div className="flex items-center gap-1.5"><label aria-label="导入 DOCX" className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 xl:hidden"><Upload className="size-4" /><input className="sr-only" type="file" accept=".docx" onChange={uploadDocx} /></label><select aria-label="导出格式" className="h-8 rounded-md border border-slate-200 bg-white px-1 text-[11px] xl:hidden" value={project.exportSettings.format} onChange={(event) => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, format: event.target.value as "png" | "jpg" | "pdf" } }))}><option value="png">PNG</option><option value="jpg">JPG</option><option value="pdf">PDF</option></select><Button className="xl:hidden" variant="ghost" size="icon-sm" disabled={project.handwriting.fixed} onClick={() => change((state) => ({ ...state, seed: nextSeed(state.seed) }))} aria-label="换一种笔迹"><RefreshCw /></Button><Button variant="ghost" size="icon-sm" disabled={!history.past.length} onClick={() => setHistory(undoHistory)} aria-label="撤销"><Undo2 /></Button><Button variant="ghost" size="icon-sm" disabled={!history.future.length} onClick={() => setHistory(redoHistory)} aria-label="重做"><Redo2 /></Button><Button variant="outline" className="hidden rounded-lg md:inline-flex" onClick={saveProject}><Save />保存项目</Button><Button className="rounded-lg bg-[#d96945] text-white hover:bg-[#bf5737]" onClick={exportDocument}><Download />导出 {project.exportSettings.format.toUpperCase()}</Button></div>
     </header>
 
-    <div className="sticky top-16 z-20 flex h-11 items-center gap-2 border-b border-slate-200 bg-white/95 px-4 text-xs backdrop-blur xl:hidden">
+    <div className="sticky top-16 z-20 flex h-11 shrink-0 items-center gap-2 border-b border-slate-200 bg-white/95 px-4 text-xs backdrop-blur xl:hidden">
       <select aria-label="文档结构" className="h-8 rounded-md border border-slate-200 bg-white px-2" value={project.noTemplateMode} onChange={(event) => setNoTemplateMode(event.target.value as "preserve-structure" | "simplified")}><option value="preserve-structure">保留结构</option><option value="simplified">简化正文</option></select>
       <span className={`ml-auto whitespace-nowrap ${coverage.valid ? "text-emerald-700" : "text-rose-700"}`}>Missing {coverage.missingCharacters}</span>
     </div>
 
-    <div className="grid min-h-[calc(100vh-4rem)] grid-cols-1 xl:grid-cols-[300px_minmax(620px,1fr)_320px]">
-      <aside className="border-r border-slate-200 bg-white px-4 py-5 max-xl:hidden"><Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
+    <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[300px_minmax(620px,1fr)_320px]">
+      <aside className="min-h-0 overflow-y-auto border-r border-slate-200 bg-white px-4 py-5 max-xl:hidden"><Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
         <TabsList className="grid h-auto w-full grid-cols-3"><TabsTrigger value="document">文档</TabsTrigger><TabsTrigger value="font">字体</TabsTrigger><TabsTrigger value="background">背景</TabsTrigger></TabsList>
         <TabsContent value="document" className="mt-5 space-y-5">
           <div><div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold">输入内容</h2><span className="text-xs text-[#287e86]">{parseStatus}</span></div><label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 hover:border-[#287e86]"><span className="grid size-9 place-items-center rounded-lg bg-white text-[#287e86] shadow-sm"><Upload className="size-4" /></span><span><strong className="block text-sm font-medium">替换文档</strong><small className="text-xs text-slate-400">支持 DOCX · 自动分页</small></span><input className="sr-only" type="file" accept=".docx" onChange={uploadDocx} /></label></div>
@@ -278,13 +278,13 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
           <div className="rounded-xl border border-[#cce4e2] bg-[#eff9f8] p-3 text-xs leading-5 text-[#356b6c]"><div className="mb-1 flex items-center gap-2 font-semibold"><Sparkles className="size-3.5" />Block 完整性检查</div><div className="grid grid-cols-2 gap-x-3"><span>Raw {coverage.rawCharacters}</span><span>Recognized {coverage.recognizedCharacters}</span><span>Laid out {coverage.laidOutCharacterCount}</span><span>Ignored {coverage.explicitlyIgnoredCharacters}</span></div><strong className={coverage.valid ? "text-emerald-700" : "text-rose-700"}>Missing {coverage.missingCharacters}</strong></div>
           <PageManager pages={project.pages} currentPageId={currentPage.pageId} onSelect={setCurrentPageId} onAdd={addPage} onDuplicate={copyPage} onMove={reorderPage} onDelete={deletePage} />
         </TabsContent>
-        <TabsContent value="font" className="mt-5"><FontManager fonts={fonts} selectedId={activeFontId} onSelect={selectFont} onUploaded={(asset) => setFonts((items) => [asset, ...items.filter((item) => item.id !== asset.id)])} /></TabsContent>
-        <TabsContent value="background" className="mt-5"><BackgroundManager backgrounds={backgrounds} selectedId={currentPage.backgroundId} adjustments={currentPage.backgroundAdjustments} transform={currentPage.backgroundTransform} onSelect={(backgroundId) => updateCurrentPage({ backgroundId })} onAdjust={(backgroundAdjustments) => updateCurrentPage({ backgroundAdjustments })} onTransform={(backgroundTransform) => updateCurrentPage({ backgroundTransform })} onApplyToAll={() => change((state) => ({ ...state, pages: state.pages.map((page) => ({ ...page, backgroundId: currentPage.backgroundId, backgroundAdjustments: { ...currentPage.backgroundAdjustments }, backgroundTransform: { ...currentPage.backgroundTransform } })) }))} onUploaded={(asset) => setBackgrounds((items) => [asset, ...items.filter((item) => item.id !== asset.id)])} /></TabsContent>
+        <TabsContent value="font" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<FontManager fonts={fonts} selectedId={activeFontId} onSelect={selectFont} onUploaded={(asset) => setFonts((items) => [asset, ...items.filter((item) => item.id !== asset.id)])} /></TabsContent>
+        <TabsContent value="background" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<BackgroundManager backgrounds={backgrounds} selectedId={currentPage.backgroundId} adjustments={currentPage.backgroundAdjustments} transform={currentPage.backgroundTransform} onSelect={(backgroundId) => updateCurrentPage({ backgroundId })} onAdjust={(backgroundAdjustments) => updateCurrentPage({ backgroundAdjustments })} onTransform={(backgroundTransform) => updateCurrentPage({ backgroundTransform })} onApplyToAll={() => change((state) => ({ ...state, pages: state.pages.map((page) => ({ ...page, backgroundId: currentPage.backgroundId, backgroundAdjustments: { ...currentPage.backgroundAdjustments }, backgroundTransform: { ...currentPage.backgroundTransform } })) }))} onUploaded={(asset) => setBackgrounds((items) => [asset, ...items.filter((item) => item.id !== asset.id)])} /></TabsContent>
       </Tabs></aside>
 
-      <section className="flex min-h-[820px] flex-col overflow-hidden bg-[#e7ecef]"><div className="sticky top-0 z-10 flex h-12 items-center justify-between border-b border-slate-200 bg-white/80 px-5 text-xs text-slate-500"><span className="flex items-center gap-2"><Grid3X3 className="size-4" />多页 Canvas · 当前第 {currentPage.pageIndex + 1} 页</span><span className="flex items-center gap-2"><Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.max(0.5, value - 0.08))}><Minus /></Button>{Math.round(zoom * 100)}%<Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.min(1.2, value + 0.08))}><Plus /></Button></span></div><div className="scrollbar-thin flex flex-1 flex-col items-center gap-12 overflow-auto p-8 sm:p-12">{project.pages.map((page) => <div key={page.pageId} className="space-y-3"><div className="text-center text-xs text-slate-500">第 {page.pageIndex + 1} 页 · {page.pageType ?? "continuation"}</div><HandwritingCanvas options={optionsFor(page.pageId)} zoom={zoom} active={page.pageId === currentPage.pageId} onActivate={() => setCurrentPageId(page.pageId)} onSelectLine={selectLine} onChangeLines={(lines, phase) => onDragLines(page.pageId, lines, phase)} /></div>)}</div></section>
+      <section className="flex min-h-0 flex-col overflow-hidden bg-[#e7ecef]"><div className="sticky top-0 z-10 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white/80 px-5 text-xs text-slate-500"><span className="flex items-center gap-2"><Grid3X3 className="size-4" />多页 Canvas · 当前第 {currentPage.pageIndex + 1} 页</span><span className="flex items-center gap-2"><Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.max(0.5, value - 0.08))}><Minus /></Button>{Math.round(zoom * 100)}%<Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.min(1.2, value + 0.08))}><Plus /></Button></span></div><div className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center gap-12 overflow-auto p-8 sm:p-12">{project.pages.map((page) => <div key={page.pageId} className="space-y-3"><div className="text-center text-xs text-slate-500">第 {page.pageIndex + 1} 页 · {page.pageType ?? "continuation"}</div><HandwritingCanvas options={optionsFor(page.pageId)} zoom={zoom} active={page.pageId === currentPage.pageId} onActivate={() => setCurrentPageId(page.pageId)} onSelectLine={selectLine} onChangeLines={(lines, phase) => onDragLines(page.pageId, lines, phase)} /></div>)}</div></section>
 
-      <aside className="border-l border-slate-200 bg-white px-5 py-5 max-xl:hidden">{selected ? <>
+      <aside className="min-h-0 overflow-y-auto border-l border-slate-200 bg-white px-5 py-5 max-xl:hidden">{selected ? <>
         <div className="mb-5 flex items-center justify-between"><div><h2 className="text-sm font-semibold">当前行参数</h2><p className="mt-0.5 text-xs text-slate-400">自动坐标 + 手动偏移 · 字符状态稳定</p></div><Switch checked={selected.locked} onCheckedChange={(locked) => updateLine({ locked })} aria-label="锁定当前行" /></div>
         <button onClick={() => setActiveTab("font")} className="mb-5 flex h-10 w-full items-center justify-between rounded-lg border border-slate-200 px-3 text-sm text-slate-700"><span>字体 · {font.name}</span><ChevronDown className="size-4 text-slate-400" /></button>
         <div className="space-y-4"><RangeRow label="X（最终）" value={lineX(selected)} display={`${Math.round(lineX(selected))} px`} min={0} max={560} onChange={(x) => updateLine({ manualOffsetX: x - selected.autoX })} /><RangeRow label="Y（最终）" value={lineY(selected)} display={`${Math.round(lineY(selected))} px`} min={100} max={780} onChange={(y) => updateLine({ manualOffsetY: y - selected.autoY })} /><RangeRow label="字号" value={selected.fontSize} display={`${selected.fontSize} px`} min={12} max={28} onChange={(fontSize) => updateLine({ fontSize })} /><RangeRow label="字距" value={selected.letterSpacing} display={`${selected.letterSpacing.toFixed(1)} px`} min={-1} max={5} step={0.1} onChange={(letterSpacing) => updateLine({ letterSpacing })} /><RangeRow label="旋转" value={selected.rotation} display={`${selected.rotation.toFixed(1)}°`} min={-4} max={4} step={0.1} onChange={(rotation) => updateLine({ rotation })} /><RangeRow label="行距" value={selected.lineHeight} display={`${selected.lineHeight} px`} min={28} max={72} onChange={(lineHeight) => updateLine({ lineHeight })} /></div>

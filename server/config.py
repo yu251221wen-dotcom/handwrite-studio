@@ -13,6 +13,7 @@ def _origins(value: str) -> tuple[str, ...]:
 class Settings:
     environment: str
     allowed_origins: tuple[str, ...]
+    public_api_base_url: str | None
     upload_dir: Path
     temp_file_ttl_hours: int
     max_upload_size_mb: int
@@ -28,10 +29,13 @@ def load_settings() -> Settings:
     allowed_origins = _origins(os.getenv("ALLOWED_ORIGINS", default_origins))
     if environment == "production" and (not allowed_origins or any("*" in origin or not origin.startswith("https://") for origin in allowed_origins)):
         raise RuntimeError("生产环境必须配置 ALLOWED_ORIGINS")
+    public_api_base_url = os.getenv("PUBLIC_API_BASE_URL", "").strip().rstrip("/") or None
+    if environment == "production" and (not public_api_base_url or not public_api_base_url.startswith("https://")):
+        raise RuntimeError("生产环境必须配置 HTTPS PUBLIC_API_BASE_URL")
     project_root = Path(__file__).resolve().parent.parent
     upload_dir = Path(os.getenv("UPLOAD_DIR", str(project_root / "data" / "sessions"))).expanduser().resolve()
     return Settings(
-        environment=environment, allowed_origins=allowed_origins, upload_dir=upload_dir,
+        environment=environment, allowed_origins=allowed_origins, public_api_base_url=public_api_base_url, upload_dir=upload_dir,
         temp_file_ttl_hours=max(1, int(os.getenv("TEMP_FILE_TTL_HOURS", "24"))),
         max_upload_size_mb=max(1, int(os.getenv("MAX_UPLOAD_SIZE_MB", "20"))),
     )

@@ -10,7 +10,7 @@ export function serializeProject(state: ProjectState): string {
 function disableLegacyTemplateState(state: ProjectState): ProjectState {
   return {
     ...state,
-    projectVersion: "3.1.0",
+    projectVersion: "3.1.1",
     layoutMode: "no-template",
     templateId: null,
     mappedBlockIds: [],
@@ -70,7 +70,7 @@ export function migrateProjectV2(old: ProjectStateV2): ProjectState {
   });
   const blockByField = new Map(old.fieldMappings.map((field) => [field.id, `v2-field-${field.id}`]));
   return {
-    ...old, schemaVersion: 3, projectVersion: "3.1.0", layoutMode: "no-template",
+    ...old, schemaVersion: 3, projectVersion: "3.1.1", layoutMode: "no-template",
     noTemplateMode: "preserve-structure", templateId: null, documentBlocks,
     mappedBlockIds: [], unmappedBlockIds: [],
     explicitlyIgnoredBlockIds: [], documentLayoutSettings: { ...DEFAULT_DOCUMENT_LAYOUT_SETTINGS },

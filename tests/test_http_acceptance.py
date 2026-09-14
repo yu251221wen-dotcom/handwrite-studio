@@ -25,7 +25,8 @@ class HttpAcceptanceTests(unittest.TestCase):
         cls.base = f'http://127.0.0.1:{cls.port}'
         cls.process = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'server.main:app', '--host', '127.0.0.1', '--port', str(cls.port)],
             cwd=Path(__file__).resolve().parent.parent,
-            env={**os.environ, 'UPLOAD_DIR': cls.temp.name, 'ENVIRONMENT': 'development', 'ALLOWED_ORIGINS': 'http://localhost:5173'},
+            env={**os.environ, 'UPLOAD_DIR': cls.temp.name, 'ENVIRONMENT': 'development',
+                 'ALLOWED_ORIGINS': 'http://localhost:5173', 'PUBLIC_API_BASE_URL': 'https://api.example.test'},
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(100):
             try:
@@ -66,7 +67,7 @@ class HttpAcceptanceTests(unittest.TestCase):
     def test_health_and_exact_cors(self):
         status, headers, body = self.request('/health', headers={'Origin': 'http://localhost:5173'})
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body)['version'], '3.1.0')
+        self.assertEqual(json.loads(body)['version'], '3.1.1')
         self.assertEqual(headers.get('access-control-allow-origin'), 'http://localhost:5173')
         self.assertNotIn('access-control-allow-origin', self.request('/health', headers={'Origin': 'https://untrusted.example'})[1])
 
@@ -100,7 +101,9 @@ class HttpAcceptanceTests(unittest.TestCase):
         image = io.BytesIO(); Image.new('RGB', (100, 140), '#eeeecc').save(image, 'PNG')
         status, _, body = self.multipart('/api/backgrounds', [('file', 'paper.png', 'image/png', image.getvalue())], session=first)
         self.assertEqual(status, 200)
-        resource_id = json.loads(body)['id']
+        uploaded = json.loads(body)
+        resource_id = uploaded['id']
+        self.assertTrue(uploaded['fileUrl'].startswith('https://api.example.test/api/backgrounds/'))
         self.assertEqual(self.request(f'/api/backgrounds/{resource_id}/file?session={second}')[0], 404)
         self.assertEqual(self.request(f'/api/backgrounds/{resource_id}/file?session={first}')[0], 200)
 

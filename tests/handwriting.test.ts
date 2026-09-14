@@ -8,7 +8,7 @@ import { FONT_SLOTS } from "../lib/handwriting/font-library.ts";
 import { DEFAULT_RANDOMIZATION, generateCharacterStates } from "../lib/handwriting/randomization.ts";
 import { deserializeProject, serializeProject } from "../lib/handwriting/serialization.ts";
 import { nextSeed } from "../lib/handwriting/seeded-random.ts";
-import { DEFAULT_DOCUMENT_LAYOUT_SETTINGS, type FieldMapping, type LineLayout, type ProjectState, type ProjectStateV2 } from "../lib/handwriting/types.ts";
+import { DEFAULT_DOCUMENT_LAYOUT_SETTINGS, type DocumentBlock, type FieldMapping, type LineLayout, type ProjectState, type ProjectStateV2 } from "../lib/handwriting/types.ts";
 import { commitHistory, createHistory, redoHistory, undoHistory } from "../lib/history/history-store.ts";
 import { V3_SHOWCASE_BLOCKS, V3_SHOWCASE_FIELDS } from "../lib/demo/v3-showcase-fixture.ts";
 import { layoutDocumentBlocks } from "../lib/layout/block-layout-engine.ts";
@@ -115,6 +115,31 @@ test("no-template preserve structure creates every block kind with missing zero"
   for (const kind of ["heading", "paragraph", "key-value", "table", "prescription", "signature"]) assert.ok(kinds.has(kind as never));
   assert.ok(result.lines.some((line) => line.visualKind === "table"));
   assert.ok(result.lines.some((line) => line.blockType === "prescription" && line.text.includes("\t")));
+});
+
+test("a long paragraph consumes remaining page space without creating an avoidable blank area", () => {
+  const makeParagraph = (blockId: string, sourceText: string, sourceStart: number): DocumentBlock => ({
+    blockId, type: "paragraph", sourceOrder: sourceStart, sourceStart,
+    sourceEnd: sourceStart + Array.from(sourceText).length, sourceText, content: sourceText,
+    firstLineIndent: 0, lineHeight: 34, paragraphSpacing: 0,
+  });
+  const blocks = [makeParagraph("short", "甲".repeat(30), 0), makeParagraph("long", "乙".repeat(100), 30)];
+  const result = layoutDocumentBlocks({
+    documentId: "compact-pages", blocks,
+    measurer: { measure: (text) => Array.from(text).length * 10 },
+    fontId: FONT_SLOTS[0].id, fontFamily: FONT_SLOTS[0].family,
+    settings: {
+      ...DEFAULT_DOCUMENT_LAYOUT_SETTINGS,
+      marginTop: 100, marginBottom: 334, marginLeft: 247.5, marginRight: 247.5,
+      bodyFontSize: 17, lineHeight: 34, letterSpacing: 0,
+      paragraphSpacingBefore: 0, paragraphSpacingAfter: 0, firstLineIndent: 0,
+    },
+    backgroundId: BACKGROUND_PRESETS[0].id, mode: "preserve-structure",
+  });
+  assert.equal(result.pages.length, 2);
+  assert.deepEqual(result.pages.map((page) => page.lines.length), [11, 2]);
+  const coverage = validateDocumentCoverage([], result.pages, { blocks });
+  assert.equal(coverage.missingCharacters, 0);
 });
 
 test("simplified mode preserves source while weakening tables and columns", () => {
