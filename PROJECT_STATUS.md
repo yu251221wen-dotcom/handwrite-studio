@@ -82,7 +82,6 @@
 
 ## 当前未完成
 
-- 正式公网 HTTPS 部署
 - 横线自动检测
 - 横线文字吸附
 - 透视校正
@@ -93,13 +92,13 @@
 
 ## 当前最高优先级
 
-当前阶段：V3.1
+当前阶段：V3.1 公网交付完成
 
-1. 完成正式公网 HTTPS 部署
-2. 提供可访问的 Frontend / API / Showcase 地址
-3. 保持 Session isolation、精确 CORS 和 `/health`
-4. 保持 Golden Test Missing = 0
-5. 不破坏当前 V3.1 功能
+1. 保持 Frontend / API / Showcase 公网地址可用
+2. 保持 Session isolation、精确 CORS 和 `/health`
+3. 保持 Golden Test Missing = 0
+4. 不破坏当前 V3.1 功能
+5. 后续按路线进入 V4，不提前开发 OCR、透视或 AI 字形
 
 ---
 
@@ -118,6 +117,10 @@
 - Build：production build 通过
 - FastAPI health：通过，`status=ok`、`version=3.1.0`
 - Golden Test：Raw 3657 / Laid out 3657 / Missing 0；实际 Canvas `fillText` 覆盖率通过
+- 公网 DOCX：合成长文档 Raw 3097，DocumentBlock 5，弃用字段映射结果 0
+- 公网 Session isolation：同一项目 Session A 读取 200，Session B 读取 404
+- 公网 CORS：正式前端 Origin 允许，预检 200，`X-Session-ID` 已允许
+- 公网 PDF：三张 2480 × 3508 页面导出 HTTP 200，实测 PDF 3 页、A4 MediaBox
 - Clean-room：V3.0 最近一次通过；V3.1 尚未重新打包和执行 clean-room
 
 V3.1 本轮完整源码测试已通过；正式 ZIP 与 clean-room 将在部署授权和本轮交付打包时更新。
@@ -144,25 +147,25 @@ V3.1 本轮完整源码测试已通过；正式 ZIP 与 clean-room 将在部署�
 
 ## 当前公网地址
 
-- Frontend：Not deployed
+- Frontend：`https://handwrite-studio-yu251221wen.fast-drum-0976.chatgpt.site/`
 - API：`https://handwrite-studio-api-production.up.railway.app`
 - Health：`https://handwrite-studio-api-production.up.railway.app/health`（HTTP 200，`status=ok`、`version=3.1.0`、`environment=production`）
-- Showcase：Not deployed
+- Showcase：`https://handwrite-studio-yu251221wen.fast-drum-0976.chatgpt.site/showcase`
 
 ---
 
 ## 当前部署状态
 
-Railway FastAPI production 后端已部署成功：服务 `handwrite-studio-api`，GitHub `main` 提交 `6be676dae57cb93ae5f0b265bb467e4b4cbafa59`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。Render 因绑卡要求停用。
+Railway FastAPI production 后端已部署成功：服务 `handwrite-studio-api`，GitHub `main` 提交 `b65a4b6441a143b3654d25478d1da5002fa221da`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。Render 因绑卡要求停用。
 
-当前 `ALLOWED_ORIGINS=https://handwrite-studio.invalid` 是前端上线前的临时拒绝式占位值；生成实际 HTTPS 前端域名后必须立即替换为精确 Origin。
+Sites 前端已公开发布，生产构建使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app`。Railway `ALLOWED_ORIGINS` 已精确设置为正式前端 Origin，不使用通配符。
 
 ---
 
 ## 当前已知问题
 
 - Cloudflare / Vite 开发运行时可能在类型初始化时出现 `fetch failed` / `ECONNRESET`；production build 和本地生产预览稳定
-- Railway API 已上线；正式前端与 Showcase 尚未部署，且前端上线后需要同步更新 API 的精确 `ALLOWED_ORIGINS`
+- 当前本机代理访问 `chatgpt.site` 偶发 `ERR_CONNECTION_CLOSED`；同一正式首页与 Showcase 已分别成功完成浏览器渲染，Sites 部署状态为 `succeeded`
 - 旧字段布局引擎与字段映射模块仍作为迁移兼容源码保留，但没有正式运行入口
 - 自动排版后手工改页次可保存，但再次全局重排会重建自动页顺序
 - 跨软件关闭的草稿恢复受浏览器 Session 生命周期限制，应使用项目 JSON
