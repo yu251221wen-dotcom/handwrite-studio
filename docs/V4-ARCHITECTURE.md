@@ -1,6 +1,6 @@
-# V4 横线适配与字体加载架构
+# V4.1 横线适配与背景感知排版架构
 
-V4.0 是 V3 无模板 DocumentBlock 工作流上的增量版本。它不改变分页、逐行编辑、字符随机 key 或导出协议，只在字体资源加载和页面视觉排版之间增加可验证的字体就绪门槛与页面级横线适配层。
+V4.1 是 V3 无模板 DocumentBlock 工作流上的增量版本。它不改变逐行编辑、字符随机 key 或导出协议，在 V4.0 横线检测基础上增加独立的纸线槽位分页分支。
 
 ## 字体加载链路
 
@@ -32,6 +32,8 @@ V4.0 只处理基本水平、无明显透视的纸张。背景旋转超过容差
 ```text
 enabled / lineY[] / averageSpacing / confidence
 snapEnabled / offsetY / showLines / source
+firstUsableLine / lastUsableLine
+writableLeft / writableRight
 ```
 
 每条视觉行保存 `lineSnapOffset`、`assignedPaperLineY` 和 `assignedPaperLineIndex`，最终位置为：
@@ -40,7 +42,13 @@ snapEnabled / offsetY / showLines / source
 finalY = autoY + lineSnapOffset + manualOffsetY
 ```
 
-重新检测或手动校准横线会运行全页单调动态规划：在保持正文顺序的前提下最小化总移动距离，并严格递增纸线索引，因此同一条纸线不会分配给两个文字视觉行。检测成功后正文行高采用检测出的纸张行距重新分页，再计算吸附；旧项目中被裁剪的纸线列表只沿既有平均间距向边缘外推。`manualOffsetY` 始终作为吸附后的独立偏移保留，Seed 不参与 Y 坐标计算。背景面板显示每一行的文字基线、已分配纸线、差值和重复分配计数，便于直接验收。
+V4.1 启用横线适配后不再以普通像素 `autoY` 为纵向主坐标。`lib/layout/background-aware-layout.ts` 先根据首末可写横线生成页面槽位；`block-layout-engine.ts` 让每个视觉行直接占用一个槽位，槽位用完后自动分页。普通段落、List 和诊断条目默认连续占用纸线；Block 的像素间距先换算成跳过 0/1/N 条完整纸线，避免产生不必要的大段空白。页面上的已检测纸线不会向物理范围之外虚构延伸。
+
+横线检测会从横线连续像素估算 `writableLeft` 和 `writableRight`，并以此决定换行宽度和自动 X 坐标。背景面板允许手动调整首条/末条可写横线、左右边界和整体 baseline offset，并显示 `writableTop`、`writableBottom` 与可用槽位数。
+
+未启用横线时继续进入原有普通 Block-aware 像素分页器。旧 V4 项目在反序列化时由 `normalizeLineDetection()` 补充新字段，不修改 SchemaVersion、既有行 ID、手动偏移或 Seed。
+
+旧项目或独立调用仍可使用单调动态规划吸附：在保持正文顺序的前提下最小化总移动距离，并严格递增纸线索引，因此同一条纸线不会分配给两个文字视觉行。`manualOffsetY` 始终作为纸线基线后的独立偏移保留，Seed 不参与坐标计算。背景面板显示每一行的文字基线、已分配纸线、差值和重复分配计数，便于直接验收。
 
 字符随机 key 仍只依赖文档、Block/字段、原文字符索引、字体、Seed 和手写参数，不依赖页码、坐标或背景，因此分页、拖动、换背景和横线吸附不会重生成笔迹。
 
@@ -54,4 +62,4 @@ finalY = autoY + lineSnapOffset + manualOffsetY
 
 横线检测只在用户点击“自动检测”时运行，不进入拖动或每帧渲染。字符仍使用 Canvas 批量绘制，不为每个字符创建 DOM、Konva 或 Fabric 节点。
 
-回归测试覆盖标准横线、扫描噪声、粗线双边缘合并、纯白纸拒绝、单调一一匹配、重复纸线拒绝、页面级序列化、手动偏移保留、Seed key 稳定、字体切换坐标稳定、公网会话瞬时失败重试、PNG/JPG 背景上传与精确 CORS，以及普通段落不受 List 紧凑间距影响。
+回归测试覆盖标准横线、扫描噪声、粗线双边缘合并、纯白纸拒绝、可写左右边界估算、单调一一匹配、连续槽位、首末可写线分页、整纸线 Block 间距、页面级序列化、手动偏移保留、Seed key 稳定、Golden Missing=0、字体切换坐标稳定、公网会话瞬时失败重试、PNG/JPG 背景上传与精确 CORS，以及无横线普通排版不回归。

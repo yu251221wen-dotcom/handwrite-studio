@@ -12,6 +12,7 @@ import { createApproximateTextMeasurer } from "../lib/layout/text-measure.ts";
 import { renderTextLayer } from "../lib/handwriting/canvas-renderer.ts";
 import { BACKGROUND_PRESETS } from "../lib/handwriting/background-library.ts";
 import { recordingCanvas } from "./recording-canvas.ts";
+import { DEFAULT_LINE_DETECTION, normalizeLineDetection } from "../lib/background/line-detection.ts";
 
 const goldenFixture = "tests/fixtures/cardiology-inpatient-record.docx";
 
@@ -61,4 +62,28 @@ test("Golden DOCX actual rendered text coverage, supported modes, and deletion d
       assert.equal(validateDocumentCoverage([], copy, { blocks }).valid, false);
     }
   }
+
+  const ruledDetection = normalizeLineDetection({ ...DEFAULT_LINE_DETECTION, enabled: true, snapEnabled: true,
+    source: "detected", lineY: Array.from({ length: 22 }, (_, index) => 72 + index * 32), averageSpacing: 32,
+    firstUsableLine: 1, lastUsableLine: 20, writableLeft: 66, writableRight: 522, offsetY: -2 });
+  const ruledState: ProjectState = { ...base, pages: [{
+    pageId: "page-1", pageIndex: 0, templateId: "no-template-a4", pageType: "first", pageTemplateId: null,
+    widthMm: 210, heightMm: 297, backgroundId: "golden-ruled",
+    backgroundAdjustments: { brightness: 100, contrast: 100, saturation: 100, blur: 0, noise: 0, rotation: 0 },
+    backgroundTransform: { fitMode: "cover", scale: 1, offsetX: 0, offsetY: 0 },
+    lineDetection: ruledDetection, blockIds: [], lines: [],
+  }] };
+  const ruledPages = layoutProjectPages(ruledState, createApproximateTextMeasurer(), FONT_SLOTS[0]);
+  const ruledCoverage = validateDocumentCoverage([], ruledPages, { blocks });
+  assert.equal(ruledCoverage.missingCharacters, 0);
+  assert.ok(ruledPages.length >= 3);
+  for (const page of ruledPages) {
+    assert.ok(page.lines.length <= 20);
+    const assignments = page.lines.map((line) => line.assignedPaperLineIndex);
+    assert.equal(new Set(assignments).size, assignments.length);
+    assert.ok(assignments.every((index) => index !== undefined && index >= 1 && index <= 20));
+  }
+  console.log(JSON.stringify({ mode: "background-aware", raw: result.document.rawCharacterCount,
+    laidOut: ruledCoverage.laidOutCharacterCount, pages: ruledPages.length, usableLinesPerPage: 20,
+    missing: ruledCoverage.missingCharacters }));
 });

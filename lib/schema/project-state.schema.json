@@ -83,7 +83,7 @@
         "backgroundAdjustments": { "type": "object" }, "backgroundTransform": { "type": "object" },
         "lineDetection": {
           "type": "object",
-          "required": ["enabled", "lineY", "averageSpacing", "confidence", "snapEnabled", "offsetY", "showLines", "source"],
+          "required": ["enabled", "lineY", "averageSpacing", "confidence", "snapEnabled", "offsetY", "showLines", "firstUsableLine", "lastUsableLine", "writableLeft", "writableRight", "source"],
           "properties": {
             "enabled": { "type": "boolean" },
             "lineY": { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 842 } },
@@ -92,6 +92,10 @@
             "snapEnabled": { "type": "boolean" },
             "offsetY": { "type": "number" },
             "showLines": { "type": "boolean" },
+            "firstUsableLine": { "type": "integer", "minimum": 0 },
+            "lastUsableLine": { "type": "integer", "minimum": -1 },
+            "writableLeft": { "type": "number", "minimum": 0, "maximum": 534 },
+            "writableRight": { "type": "number", "minimum": 60, "maximum": 595 },
             "source": { "enum": ["none", "preset", "detected", "manual"] }
           },
           "additionalProperties": false

@@ -8,13 +8,14 @@
 
 ## 当前版本
 
-- Version：4.0.0（V4.0）
+- Version：4.1.0（V4.1）
 - SchemaVersion：3
 - 更新日期：2026-09-15
 - GitHub：`https://github.com/yu251221wen-dotcom/handwrite-studio`
 - V4 实现提交：`e6926cdf07dd0116e68ee6d9c34243de65596448`
 - 横线吸附防重叠修复：`41ebf6e55ecb345c7c3b6534c51a3addff629405`
 - V4 公网背景与单调吸附修复：`e83bb92`
+- V4.1 背景感知纸线槽位布局：本轮待提交
 
 ---
 
@@ -68,6 +69,10 @@
 - [x] 横线行距、整体 Y 偏移、添加/删除/重置和布局建议
 - [x] 横线吸附单调一一匹配（动态规划），禁止两行正文吸到同一纸线
 - [x] 横线匹配诊断（文字行、纸线、基线差值、重复分配数）
+- [x] 背景感知纸线槽位布局（横线纸以检测到的物理纸线作为纵向主坐标系）
+- [x] 第一/最后可写横线、左右可写边界和基线偏移手动校准
+- [x] 连续正文/列表逐纸线排布；标题和段间距用整条纸线槽位表达
+- [x] 可写纸线耗尽后自动分页；不再在检测范围外虚构纸线
 - [x] character-level handwriting
 - [x] deterministic Seed
 - [x] fixed handwriting
@@ -108,35 +113,37 @@
 
 ## 当前最高优先级
 
-当前阶段：V4.0 修复已完成并部署公网
+当前阶段：V4.1 背景感知布局本地实现与验收完成，待推送并复核公网自动部署
 
 1. Cloudflare Pages 正式前端保持可用
 2. 保持 Session isolation、精确 CORS 和 `/health`
 3. 保持 Golden Test Missing = 0
-4. 保持 `autoY + lineSnapOffset + manualOffsetY`、单调一一匹配和 Seed 稳定性
+4. 保持 `autoY + lineSnapOffset + manualOffsetY`、纸线槽位唯一分配和 Seed 稳定性
 5. 不提前开发 OCR、透视或 AI 字形
 
 ---
 
 ## 下一阶段
 
-V4.0 已完成。下一阶段可进入 V5 纸张倾斜和四角透视校准，但在用户明确开始前不提前开发；OCR、AI 字段匹配和 AI 字迹继续暂缓。
+V4.1 完成后，下一阶段可进入 V5 纸张倾斜和四角透视校准，但在用户明确开始前不提前开发；OCR、AI 字段匹配和 AI 字迹继续暂缓。
 
 ---
 
 ## 最近测试结果
 
-- TypeScript：37 / 37 通过
+- TypeScript：39 / 39 通过
 - Python：16 / 16 通过
 - Typecheck：通过
 - ESLint：0 error
 - Build：Vinext production build 通过
 - Cloudflare Pages 静态导出：通过；4 个正式路由均生成到 `out/`
-- FastAPI health：本地与公网均通过，`status=ok`、`version=4.0.0`
+- FastAPI health：本地通过，`status=ok`、`version=4.1.0`；公网待本轮部署后复核
 - Golden Test：Raw 3657 / Laid out 3657 / Missing 0；实际 Canvas `fillText` 覆盖率通过
 - 公网 DOCX：合成长文档 Raw 3097 / Laid out 3097 / Missing 0，DocumentBlock 5，自动排版 7 页
 - 横线检测：标准/噪声/粗线双边缘合并单测通过；纯白背景不会误启用吸附
-- 横线匹配：动态规划保持文字顺序；纸线索引严格递增；重复分配为 0；纸线不足时仅按检测行距从边缘延伸
+- 横线布局：检测纸线是纵向主坐标系；正文/列表连续占用物理纸线；纸线索引严格递增；重复分配为 0；纸线不足时分页，不在边缘外延伸虚构纸线
+- 背景感知 Golden：Raw 3657 / Laid out 3657 / Missing 0；每页 20 条可写纸线，共 10 页
+- V4.1 浏览器验收：淡蓝横线 40 识别 21 条，连续正文使用相邻纸线；首尾可写横线改为 3–6 后自动分为 2 页；恢复后 1–21 行，左右边界校准生效
 - 公网横线预设：轻噪扫描横线纸识别 18 条，置信度 100%
 - 公网上传背景：真实 UI 连续上传合成 PNG 与 JPG 均成功；同一 Session 列表可见两项，上传资源按 Session 隔离
 - 公网背景检测：合成横线纸识别 21 条，平均行距 37 px，置信度 100%；8 行文字按 `1→1、2→2、3→3、4→5、5→6、6→7、7→8、8→9` 匹配，所有基线差值为 -2 px，重复分配 0
@@ -152,7 +159,7 @@ V4.0 已完成。下一阶段可进入 V5 纸张倾斜和四角透视校准，�
 - Cloudflare Pages：4 个正式路由 `/`、`/font-library/`、`/background-library/`、`/showcase/` 均为 HTTP 200
 - Clean-room：V3.0 最近一次通过；V4.0 尚未重新打包和执行 clean-room
 
-V4.0 完整源码测试与公网验收已通过；正式 ZIP 与 clean-room 需在单独的源码交付轮次更新。
+V4.1 完整源码测试与本地验收已通过；公网验收在本轮推送后完成。正式 ZIP 与 clean-room 仍需在单独的源码交付轮次更新。
 
 ---
 
@@ -167,10 +174,10 @@ V4.0 完整源码测试与公网验收已通过；正式 ZIP 与 clean-room 需�
 
 ## 当前本地地址
 
-- Frontend：V4.0 运行于 `http://localhost:5173/`
-- Showcase：V4.0 可由 `http://localhost:5173/showcase` 验收
-- Backend：V4.0 运行于 `http://127.0.0.1:8000`
-- Health：本地与公网均验证 `status=ok`、`version=4.0.0`
+- Frontend：V4.1 运行于 `http://localhost:5173/`
+- Showcase：V4.1 可由 `http://localhost:5173/showcase` 验收
+- Backend：V4.1 运行于 `http://127.0.0.1:8000`
+- Health：本地验证 `status=ok`、`version=4.1.0`
 
 ---
 

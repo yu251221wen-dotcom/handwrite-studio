@@ -6,6 +6,7 @@ import {
   DEFAULT_LINE_DETECTION,
   detectHorizontalLines,
   lineSnapDiagnostics,
+  normalizeLineDetection,
   presetHorizontalLines,
   respaceHorizontalLines,
 } from "../lib/background/line-detection.ts";
@@ -58,6 +59,8 @@ test("uniform and noisy horizontal paper lines are detected without OpenCV", () 
     assert.ok(result.lineY.length >= 17, `expected ruled lines with noisy=${noisy}`);
     assert.ok(Math.abs(result.averageSpacing - 42) <= 1);
     assert.ok(result.confidence >= 0.7);
+    assert.ok((result.writableLeft ?? 0) >= 20);
+    assert.ok((result.writableRight ?? 0) > 540);
   }
 });
 
@@ -97,8 +100,8 @@ test("snapping preserves manual offsets and cannot alter deterministic handwriti
   assert.equal(characterStateKey(line, options), characterStateKey(snapped.lines[0], { ...options, page: snapped }));
 });
 
-test("monotonic matching assigns every document row to a unique ordered paper rule", () => {
-  const lines = [57, 91, 125, 159, 193, 227, 261, 295, 329].map((autoY, index) => ({
+test("monotonic matching assigns every document row to a unique physical paper rule", () => {
+  const lines = [57, 91, 125, 159, 193, 227, 261, 295].map((autoY, index) => ({
     ...line, id: `line-${index}`, autoY, manualOffsetY: index === 4 ? 7 : 0,
   }));
   const ruledPage = { ...page, lines };
@@ -107,13 +110,53 @@ test("monotonic matching assigns every document row to a unique ordered paper ru
   const snapped = applyLineSnapping(ruledPage, detection);
   const automaticBaselines = snapped.lines.map((item) => item.autoY + (item.lineSnapOffset ?? 0));
   assert.equal(new Set(automaticBaselines).size, automaticBaselines.length);
-  assert.deepEqual(snapped.lines.map((item) => item.assignedPaperLineY), [45, 90, 135, 180, 225, 270, 315, 360, 405]);
-  assert.deepEqual(snapped.lines.map((item) => item.assignedPaperLineIndex), [0, 1, 2, 3, 4, 5, 6, 7, 8]);
-  assert.deepEqual(automaticBaselines.slice(1).map((value, index) => value - automaticBaselines[index]), Array(8).fill(45));
+  assert.deepEqual(snapped.lines.map((item) => item.assignedPaperLineY), [45, 90, 135, 180, 225, 270, 315, 360]);
+  assert.deepEqual(snapped.lines.map((item) => item.assignedPaperLineIndex), [0, 1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(automaticBaselines.slice(1).map((value, index) => value - automaticBaselines[index]), Array(7).fill(45));
   assert.equal(snapped.lines[4].manualOffsetY, 7);
   const diagnostics = lineSnapDiagnostics(snapped);
   assert.equal(new Set(diagnostics.map((item) => item.paperLineIndex)).size, diagnostics.length);
-  assert.deepEqual(diagnostics.map((item) => item.difference), [-2, -2, -2, -2, 5, -2, -2, -2, -2]);
+  assert.deepEqual(diagnostics.map((item) => item.difference), [-2, -2, -2, -2, 5, -2, -2, -2]);
+});
+
+test("paper-aware layout uses consecutive physical slots, writable bounds, and paginates at the last usable line", () => {
+  const blocks: ProjectState["documentBlocks"] = Array.from({ length: 9 }, (_, index) => ({
+    blockId: `paragraph-${index}`, type: "paragraph" as const, sourceOrder: index, sourceStart: 0, sourceEnd: 4,
+    sourceText: `正文${index + 1}`, content: `正文${index + 1}`, firstLineIndent: 0, lineHeight: 34, paragraphSpacing: 8,
+  }));
+  const detection = normalizeLineDetection({ ...DEFAULT_LINE_DETECTION, enabled: true, snapEnabled: true, source: "detected",
+    lineY: [80, 120, 160, 200, 240, 280, 320], averageSpacing: 40, firstUsableLine: 1, lastUsableLine: 5,
+    writableLeft: 72, writableRight: 505, offsetY: -3 });
+  const previousPage = { ...page, lineDetection: detection, lines: [] };
+  const first = layoutDocumentBlocks({ documentId: "paper-slots", blocks, measurer: createApproximateTextMeasurer(),
+    fontId: FONT_SLOTS[0].id, fontFamily: FONT_SLOTS[0].family, settings: DEFAULT_DOCUMENT_LAYOUT_SETTINGS,
+    backgroundId: "uploaded-paper", mode: "preserve-structure", previousPages: [previousPage] });
+  assert.equal(first.pages.length, 2);
+  assert.deepEqual(first.pages[0].lines.map((item) => item.assignedPaperLineIndex), [1, 2, 3, 4, 5]);
+  assert.deepEqual(first.pages[1].lines.map((item) => item.assignedPaperLineIndex), [1, 2, 3, 4]);
+  assert.deepEqual(first.pages[0].lines.map((item) => item.autoY), [117, 157, 197, 237, 277]);
+  assert.ok(first.lines.every((item) => item.autoX >= 72 && item.autoX < 505));
+  first.pages[1].lines[0].manualOffsetY = 9;
+  const second = layoutDocumentBlocks({ documentId: "paper-slots", blocks, measurer: createApproximateTextMeasurer(),
+    fontId: FONT_SLOTS[0].id, fontFamily: FONT_SLOTS[0].family, settings: DEFAULT_DOCUMENT_LAYOUT_SETTINGS,
+    backgroundId: "uploaded-paper", mode: "preserve-structure", previousPages: first.pages });
+  assert.equal(second.pages[1].lines[0].manualOffsetY, 9);
+});
+
+test("paper-aware block spacing is expressed as whole skipped rules while prose and lists stay continuous", () => {
+  const blocks: ProjectState["documentBlocks"] = [
+    { blockId: "paragraph-a", type: "paragraph", sourceOrder: 0, sourceStart: 0, sourceEnd: 3, sourceText: "正文甲", content: "正文甲", firstLineIndent: 0, lineHeight: 34, paragraphSpacing: 8 },
+    { blockId: "list", type: "list", sourceOrder: 1, sourceStart: 0, sourceEnd: 8, sourceText: "1. 条目甲", items: [{ marker: "1.", text: "条目甲", raw: "1. 条目甲" }] },
+    { blockId: "heading", type: "heading", sourceOrder: 2, sourceStart: 0, sourceEnd: 2, sourceText: "标题", text: "标题", level: 2, alignment: "left", fontSize: 20, fontWeight: 600, spacingBefore: 0, spacingAfter: 0, minLinesAfterHeading: 1 },
+    { blockId: "paragraph-b", type: "paragraph", sourceOrder: 3, sourceStart: 0, sourceEnd: 3, sourceText: "正文乙", content: "正文乙", firstLineIndent: 0, lineHeight: 34, paragraphSpacing: 8 },
+  ];
+  const detection = normalizeLineDetection({ ...DEFAULT_LINE_DETECTION, enabled: true, snapEnabled: true, source: "manual",
+    lineY: Array.from({ length: 12 }, (_, index) => 80 + index * 40), averageSpacing: 40, writableLeft: 58, writableRight: 537 });
+  const result = layoutDocumentBlocks({ documentId: "paper-gaps", blocks, measurer: createApproximateTextMeasurer(),
+    fontId: FONT_SLOTS[0].id, fontFamily: FONT_SLOTS[0].family,
+    settings: { ...DEFAULT_DOCUMENT_LAYOUT_SETTINGS, headingSpacingBefore: 40, headingSpacingAfter: 0 },
+    backgroundId: "ruled", mode: "preserve-structure", previousPages: [{ ...page, lineDetection: detection, lines: [] }] });
+  assert.deepEqual(result.pages[0].lines.map((item) => item.assignedPaperLineIndex), [0, 1, 3, 4]);
 });
 
 test("disabled snapping clears stored paper assignments without changing manual offsets", () => {

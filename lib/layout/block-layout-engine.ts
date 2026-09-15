@@ -6,6 +6,7 @@ import type { TextMeasurer } from "./types.ts";
 import { DEFAULT_ADJUSTMENTS, DEFAULT_TRANSFORM } from "./paginator.ts";
 import { mapSourceCharacters } from "../handwriting/source-character-map.ts";
 import { applyLineSnapping, DEFAULT_LINE_DETECTION, normalizeLineDetection } from "../background/line-detection.ts";
+import { paperSlotGap, resolveBackgroundLayoutGrid, type BackgroundLayoutGrid } from "./background-aware-layout.ts";
 
 interface BlockLayoutInput {
   documentId: string; blocks: DocumentBlock[]; measurer: TextMeasurer;
@@ -144,14 +145,124 @@ function restoreManual(line: LogicalLine, previous: Map<string, LineLayout>): Lo
     lineHeight: old.lineHeight, fontId: old.fontId, locked: old.locked } : line;
 }
 
+function paginateOnPaperLines(
+  input: BlockLayoutInput,
+  units: BlockUnit[],
+  previousLines: Map<string, LineLayout>,
+  previousAutoPages: PageState[],
+  trailingManualPages: PageState[],
+  masterGrid: BackgroundLayoutGrid,
+  masterPage?: PageState,
+): { pages: PageState[]; lines: LineLayout[] } {
+  const pages: PageState[] = [];
+  let page: PageState;
+  let grid = masterGrid;
+  let slot = 0;
+
+  const makePage = (): PageState => {
+    const index = pages.length;
+    const old = previousAutoPages[index];
+    const oldGrid = resolveBackgroundLayoutGrid(old?.lineDetection);
+    grid = oldGrid ?? masterGrid;
+    const pageId = old?.pageId ?? `page-${index + 1}`;
+    const created: PageState = {
+      pageId, pageIndex: index, templateId: "no-template-a4",
+      pageTemplateId: null, pageType: index === 0 ? "first" : "continuation",
+      widthMm: 210, heightMm: 297,
+      backgroundId: old?.backgroundId ?? masterPage?.backgroundId ?? input.backgroundId,
+      backgroundAdjustments: old?.backgroundAdjustments ?? masterPage?.backgroundAdjustments ?? { ...DEFAULT_ADJUSTMENTS },
+      backgroundTransform: old?.backgroundTransform ?? masterPage?.backgroundTransform ?? { ...DEFAULT_TRANSFORM },
+      lineDetection: grid.detection, blockIds: [], lines: [],
+    };
+    pages.push(created);
+    slot = 0;
+    return created;
+  };
+  page = makePage();
+  const nextPage = () => { page = makePage(); };
+
+  for (let unitIndex = 0; unitIndex < units.length; unitIndex += 1) {
+    const unit = units[unitIndex];
+    if (!unit.lines.length) continue;
+    const nextUnit = units[unitIndex + 1];
+    let gapBefore = slot === 0 ? 0 : paperSlotGap(unit.spacingBefore, grid.averageSpacing);
+    const availableLines = grid.usableLineCount - slot - gapBefore;
+    const requiredWithNext = unit.keepWithNext ? unit.lines.length + Math.min(unit.minLinesAfter, nextUnit?.lines.length ?? 0) : 0;
+    if ((requiredWithNext > 0 && requiredWithNext <= grid.usableLineCount && availableLines < requiredWithNext) ||
+        (!unit.allowSplit && unit.lines.length <= grid.usableLineCount && availableLines < unit.lines.length) ||
+        (availableLines > 0 && availableLines < input.settings.minLinesAtPageBottom && unit.lines.length > availableLines)) {
+      nextPage();
+      gapBefore = 0;
+    }
+    slot += Math.min(gapBefore, Math.max(0, grid.usableLineCount - slot));
+
+    let lineIndex = 0;
+    while (lineIndex < unit.lines.length) {
+      const fitCount = Math.max(0, grid.usableLineCount - slot);
+      if (fitCount === 0) { nextPage(); continue; }
+
+      const remaining = unit.lines.length - lineIndex;
+      let take = Math.min(fitCount, remaining);
+      if (remaining > take) {
+        const canSplit = unit.allowSplit || unit.lines.length > grid.usableLineCount;
+        if (!canSplit) { nextPage(); continue; }
+        const minNext = Math.min(input.settings.minLinesAtPageTop, remaining - 1);
+        take = Math.min(take, remaining - minNext);
+        const minCurrent = Math.min(input.settings.minLinesAtPageBottom, remaining - minNext);
+        if (take < minCurrent && slot > 0) { nextPage(); continue; }
+      }
+
+      for (let offset = 0; offset < take; offset += 1) {
+        const logical = restoreManual(unit.lines[lineIndex], previousLines);
+        const paperLineIndex = grid.firstUsableLine + slot;
+        const paperLineY = grid.detection.lineY[paperLineIndex];
+        const line: LineLayout = {
+          ...logical,
+          pageId: page.pageId,
+          autoY: paperLineY + grid.detection.offsetY,
+          lineSnapOffset: 0,
+          assignedPaperLineY: paperLineY,
+          assignedPaperLineIndex: paperLineIndex,
+        };
+        page.lines.push(line);
+        if (!page.blockIds!.includes(unit.block.blockId)) page.blockIds!.push(unit.block.blockId);
+        slot += 1;
+        lineIndex += 1;
+      }
+      if (lineIndex < unit.lines.length) nextPage();
+    }
+    const gapAfter = paperSlotGap(unit.spacingAfter, grid.averageSpacing);
+    slot += Math.min(gapAfter, Math.max(0, grid.usableLineCount - slot));
+  }
+
+  for (const manual of trailingManualPages) {
+    const pageIndex = pages.length;
+    pages.push({ ...manual, pageIndex, pageId: manual.pageId || `page-${pageIndex + 1}`,
+      lines: manual.lines.map((line) => ({ ...line, pageId: manual.pageId || `page-${pageIndex + 1}` })) });
+  }
+  return { pages, lines: pages.flatMap((item) => item.lines) };
+}
+
 export function layoutDocumentBlocks(input: BlockLayoutInput): { pages: PageState[]; lines: LineLayout[] } {
   const previousLines = new Map(input.previousPages?.flatMap((page) => page.lines.map((line) => [line.id, line] as const)) ?? []);
   const previousAutoPages = (input.previousPages ?? []).filter((page) => page.pageType !== "blank" && page.pageType !== "custom");
   const trailingManualPages = (input.previousPages ?? []).filter((page) => page.pageType === "blank" || page.pageType === "custom");
-  const units = input.blocks.map((block) => blockToUnit(block, input));
+  const masterPage = previousAutoPages.find((page) => Boolean(resolveBackgroundLayoutGrid(page.lineDetection)));
+  const masterGrid = resolveBackgroundLayoutGrid(masterPage?.lineDetection);
+  const layoutInput = masterGrid ? {
+    ...input,
+    settings: {
+      ...input.settings,
+      marginLeft: masterGrid.writableLeft,
+      marginRight: A4_WIDTH - masterGrid.writableRight,
+      lineHeight: masterGrid.averageSpacing,
+    },
+  } : input;
+  const units = layoutInput.blocks.map((block) => blockToUnit(block, layoutInput));
+  if (masterGrid) return paginateOnPaperLines(layoutInput, units, previousLines, previousAutoPages, trailingManualPages, masterGrid, masterPage);
   const pages: PageState[] = [];
-  const top = input.settings.marginTop;
-  const bottom = A4_HEIGHT - input.settings.marginBottom;
+  const top = layoutInput.settings.marginTop;
+  const bottom = A4_HEIGHT - layoutInput.settings.marginBottom;
   let y = top;
 
   const makePage = (): PageState => {
@@ -178,7 +289,7 @@ export function layoutDocumentBlocks(input: BlockLayoutInput): { pages: PageStat
     const availableLines = Math.floor((bottom - y - unit.spacingBefore) / Math.max(1, unit.lines[0].lineHeight));
     const requiredWithNext = unit.keepWithNext ? unit.lines.length + Math.min(unit.minLinesAfter, nextUnit?.lines.length ?? 0) : 0;
     if ((requiredWithNext && availableLines < requiredWithNext) || (!unit.allowSplit && availableLines < unit.lines.length) ||
-        (availableLines > 0 && availableLines < input.settings.minLinesAtPageBottom && unit.lines.length > availableLines)) nextPage();
+        (availableLines > 0 && availableLines < layoutInput.settings.minLinesAtPageBottom && unit.lines.length > availableLines)) nextPage();
     y += unit.spacingBefore;
     const fullUnitHeight = unit.lines.reduce((sum, line) => sum + restoreManual(line, previousLines).lineHeight, 0);
     let lineIndex = 0;
@@ -207,9 +318,9 @@ export function layoutDocumentBlocks(input: BlockLayoutInput): { pages: PageStat
 
         // Keep a small continuation at the top of the following page, but consume
         // the current page instead of moving the entire long paragraph forward.
-        const minNext = Math.min(input.settings.minLinesAtPageTop, remaining - 1);
+        const minNext = Math.min(layoutInput.settings.minLinesAtPageTop, remaining - 1);
         take = Math.min(take, remaining - minNext);
-        const minCurrent = Math.min(input.settings.minLinesAtPageBottom, remaining - minNext);
+        const minCurrent = Math.min(layoutInput.settings.minLinesAtPageBottom, remaining - minNext);
         if (take < minCurrent && y > top) { nextPage(); continue; }
       }
 

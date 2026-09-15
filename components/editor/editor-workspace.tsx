@@ -47,7 +47,7 @@ function makeProject(fields = DEMO_INITIAL_FIELDS, name = DEMO_DOCUMENT_NAME, ra
   const font = FONT_SLOTS.find((item) => item.id === fontId) ?? FONT_SLOTS[0];
   const demo = demoBlocks(fields); const documentId = documentFingerprint(demo.fields);
   const base: ProjectState = {
-    schemaVersion: 3, projectVersion: "4.0.0", id: previous?.id ?? "current",
+    schemaVersion: 3, projectVersion: "4.1.0", id: previous?.id ?? "current",
     document: { id: documentId, name, rawTexts, sourceCharacterCount: fields.reduce((sum, field) => sum + Array.from(field.value).length, 0) },
     layoutMode: "no-template", noTemplateMode: previous?.noTemplateMode ?? "preserve-structure",
     templateId: null, documentBlocks: demo.blocks,
@@ -259,8 +259,37 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   };
 
   const updateCurrentPage = (patch: Partial<typeof currentPage>) => change((state) => ({ ...state, pages: state.pages.map((page) => page.pageId === currentPage.pageId ? { ...page, ...patch } : page) }));
-  const updateLineDetection = (lineDetection: HorizontalLineDetection) => change((state) => ({ ...state, pages: state.pages.map((page) => page.pageId === currentPage.pageId ? applyLineSnapping(page, lineDetection) : page) }));
-  const selectBackground = (backgroundId: string) => change((state) => ({ ...state, pages: state.pages.map((page) => page.pageId === currentPage.pageId ? applyLineSnapping({ ...page, backgroundId }, { ...DEFAULT_LINE_DETECTION }) : page) }));
+  const commitBackgroundRelayout = (base: ProjectState) => {
+    const next = relayout(base.fieldMappings, base);
+    commit(next);
+    setSelectedId(next.pages.flatMap((page) => page.lines).some((line) => line.id === selectedId) ? selectedId : next.pages[0]?.lines[0]?.id ?? "");
+    setCurrentPageId(next.pages.some((page) => page.pageId === currentPage.pageId) ? currentPage.pageId : next.pages[0]?.pageId ?? "page-1");
+  };
+  const updateLineDetection = (lineDetection: HorizontalLineDetection) => {
+    const normalized = normalizeLineDetection(lineDetection);
+    if (currentPage.pageType === "blank" || currentPage.pageType === "custom") {
+      change((state) => ({ ...state, pages: state.pages.map((page) => page.pageId === currentPage.pageId ? applyLineSnapping(page, normalized) : page) }));
+      return;
+    }
+    const base = { ...project, pages: project.pages.map((page) => page.pageType === "blank" || page.pageType === "custom" ? page : { ...page, lineDetection: normalized }) };
+    commitBackgroundRelayout(base);
+  };
+  const selectBackground = (backgroundId: string) => {
+    const hadPaperLayout = project.pages.some((page) => page.pageType !== "blank" && page.pageType !== "custom" && normalizeLineDetection(page.lineDetection).enabled);
+    const base = { ...project, pages: project.pages.map((page) => page.pageId === currentPage.pageId ? { ...page, backgroundId, lineDetection: { ...DEFAULT_LINE_DETECTION } } : hadPaperLayout && page.pageType !== "blank" && page.pageType !== "custom" ? { ...page, lineDetection: { ...DEFAULT_LINE_DETECTION } } : page) };
+    if (hadPaperLayout) commitBackgroundRelayout(base); else commit(base);
+  };
+  const applyCurrentPaperLayoutToAll = () => {
+    const detection = normalizeLineDetection(currentPage.lineDetection);
+    const base = { ...project, pages: project.pages.map((page) => page.pageType === "blank" || page.pageType === "custom" ? page : {
+      ...page,
+      backgroundId: currentPage.backgroundId,
+      backgroundAdjustments: { ...currentPage.backgroundAdjustments },
+      backgroundTransform: { ...currentPage.backgroundTransform },
+      lineDetection: detection,
+    }) };
+    commitBackgroundRelayout(base);
+  };
   const detectCurrentBackgroundLines = async () => {
     setDetectingLines(true); setResourceError("");
     try {
@@ -283,9 +312,12 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
         const prepared: ProjectState = {
           ...project,
           documentLayoutSettings: { ...project.documentLayoutSettings, lineHeight: detectedLineHeight },
-          pages: project.pages.map((page) => ({
+          pages: project.pages.map((page) => page.pageType === "blank" || page.pageType === "custom" ? page : ({
             ...page,
-            lineDetection: page.pageId === currentPage.pageId ? next : page.lineDetection,
+            backgroundId: currentPage.backgroundId,
+            backgroundAdjustments: { ...currentPage.backgroundAdjustments },
+            backgroundTransform: { ...currentPage.backgroundTransform },
+            lineDetection: next,
             lines: page.lines.map((line) => ({ ...line, lineHeight: Math.max(line.fontSize + 8, detectedLineHeight) })),
           })),
         };
@@ -320,7 +352,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   };
   return <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f6f8] text-slate-900">
     <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white/95 px-2 backdrop-blur sm:px-7">
-      <div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#153f49] text-white"><FileText className="size-4.5" /></div><div className="hidden min-w-0 sm:block"><div className="flex items-center gap-2"><h1 className="text-[15px] font-semibold">墨迹排版台 V4.0</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost") ? "本地隐私模式" : "在线临时会话"}</span></div><p className="max-w-96 truncate text-xs text-slate-400">{project.document.name} · {project.pages.length} 页 · {project.noTemplateMode === "preserve-structure" ? "保留结构" : "简化正文"} · Seed {project.seed} · {saveStatus}</p></div></div>
+      <div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#153f49] text-white"><FileText className="size-4.5" /></div><div className="hidden min-w-0 sm:block"><div className="flex items-center gap-2"><h1 className="text-[15px] font-semibold">墨迹排版台 V4.1</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost") ? "本地隐私模式" : "在线临时会话"}</span></div><p className="max-w-96 truncate text-xs text-slate-400">{project.document.name} · {project.pages.length} 页 · {project.noTemplateMode === "preserve-structure" ? "保留结构" : "简化正文"} · Seed {project.seed} · {saveStatus}</p></div></div>
       <div className="flex items-center gap-1.5"><label aria-label="导入 DOCX" className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 xl:hidden"><Upload className="size-4" /><input className="sr-only" type="file" accept=".docx" onChange={uploadDocx} /></label><select aria-label="导出格式" className="h-8 rounded-md border border-slate-200 bg-white px-1 text-[11px] xl:hidden" value={project.exportSettings.format} onChange={(event) => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, format: event.target.value as "png" | "jpg" | "pdf" } }))}><option value="png">PNG</option><option value="jpg">JPG</option><option value="pdf">PDF</option></select><Button className="xl:hidden" variant="ghost" size="icon-sm" disabled={project.handwriting.fixed} onClick={() => change((state) => ({ ...state, seed: nextSeed(state.seed) }))} aria-label="换一种笔迹"><RefreshCw /></Button><Button variant="ghost" size="icon-sm" disabled={!history.past.length} onClick={() => setHistory(undoHistory)} aria-label="撤销"><Undo2 /></Button><Button variant="ghost" size="icon-sm" disabled={!history.future.length} onClick={() => setHistory(redoHistory)} aria-label="重做"><Redo2 /></Button><Button variant="outline" className="hidden rounded-lg md:inline-flex" onClick={saveProject}><Save />保存项目</Button><Button className="rounded-lg bg-[#d96945] text-white hover:bg-[#bf5737]" onClick={exportDocument}><Download />导出 {project.exportSettings.format.toUpperCase()}</Button></div>
     </header>
 
@@ -340,7 +372,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
           <PageManager pages={project.pages} currentPageId={currentPage.pageId} onSelect={setCurrentPageId} onAdd={addPage} onDuplicate={copyPage} onMove={reorderPage} onDelete={deletePage} />
         </TabsContent>
         <TabsContent value="font" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<FontManager fonts={fonts} selectedId={activeFontId} onSelect={(id) => selectFont(id)} onUploaded={(asset) => { setFonts((items) => [asset, ...items.filter((item) => item.id !== asset.id)]); selectFont(asset.id, asset); setResourceError(""); }} /></TabsContent>
-        <TabsContent value="background" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<BackgroundManager backgrounds={backgrounds} selectedId={currentPage.backgroundId} adjustments={currentPage.backgroundAdjustments} transform={currentPage.backgroundTransform} lineDetection={normalizeLineDetection(currentPage.lineDetection)} snapDiagnostics={currentSnapDiagnostics} detecting={detectingLines} onSelect={selectBackground} onAdjust={(backgroundAdjustments) => updateCurrentPage({ backgroundAdjustments })} onTransform={(backgroundTransform) => updateCurrentPage({ backgroundTransform })} onLineDetection={updateLineDetection} onDetectLines={() => void detectCurrentBackgroundLines()} onApplySuggestedLayout={(bodyFontSize, lineHeight) => setLayoutSettings({ ...project.documentLayoutSettings, bodyFontSize, lineHeight })} onApplyToAll={() => change((state) => ({ ...state, pages: state.pages.map((page) => applyLineSnapping({ ...page, backgroundId: currentPage.backgroundId, backgroundAdjustments: { ...currentPage.backgroundAdjustments }, backgroundTransform: { ...currentPage.backgroundTransform } }, normalizeLineDetection(currentPage.lineDetection))) }))} onUploaded={(asset) => { setBackgrounds((items) => [asset, ...items.filter((item) => item.id !== asset.id)]); selectBackground(asset.id); }} /></TabsContent>
+        <TabsContent value="background" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<BackgroundManager backgrounds={backgrounds} selectedId={currentPage.backgroundId} adjustments={currentPage.backgroundAdjustments} transform={currentPage.backgroundTransform} lineDetection={normalizeLineDetection(currentPage.lineDetection)} snapDiagnostics={currentSnapDiagnostics} detecting={detectingLines} onSelect={selectBackground} onAdjust={(backgroundAdjustments) => updateCurrentPage({ backgroundAdjustments })} onTransform={(backgroundTransform) => updateCurrentPage({ backgroundTransform })} onLineDetection={updateLineDetection} onDetectLines={() => void detectCurrentBackgroundLines()} onApplySuggestedLayout={(bodyFontSize, lineHeight) => setLayoutSettings({ ...project.documentLayoutSettings, bodyFontSize, lineHeight })} onApplyToAll={applyCurrentPaperLayoutToAll} onUploaded={(asset) => { setBackgrounds((items) => [asset, ...items.filter((item) => item.id !== asset.id)]); selectBackground(asset.id); }} /></TabsContent>
       </Tabs></aside>
 
       <section className="flex min-h-0 flex-col overflow-hidden bg-[#e7ecef]"><div className="sticky top-0 z-10 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white/80 px-5 text-xs text-slate-500"><span className="flex items-center gap-2"><Grid3X3 className="size-4" />多页 Canvas · 当前第 {currentPage.pageIndex + 1} 页</span><span className="flex items-center gap-2"><Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.max(0.5, value - 0.08))}><Minus /></Button>{Math.round(zoom * 100)}%<Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.min(1.2, value + 0.08))}><Plus /></Button></span></div><div className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center gap-12 overflow-auto p-8 sm:p-12">{project.pages.map((page) => <div key={page.pageId} className="space-y-3"><div className="text-center text-xs text-slate-500">第 {page.pageIndex + 1} 页 · {page.pageType ?? "continuation"}</div><HandwritingCanvas options={optionsFor(page.pageId, true)} zoom={zoom} active={page.pageId === currentPage.pageId} onActivate={() => setCurrentPageId(page.pageId)} onSelectLine={selectLine} onChangeLines={(lines, phase) => onDragLines(page.pageId, lines, phase)} onRenderError={setResourceError} /></div>)}</div></section>

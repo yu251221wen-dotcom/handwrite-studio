@@ -33,6 +33,10 @@ export interface BackgroundTransform {
 export interface HorizontalLineDetection {
   enabled: boolean; lineY: number[]; averageSpacing: number; confidence: number;
   snapEnabled: boolean; offsetY: number; showLines: boolean;
+  /** Inclusive indexes in lineY. -1 for lastUsableLine means the final detected rule. */
+  firstUsableLine: number; lastUsableLine: number;
+  /** Writable horizontal bounds in logical A4 canvas pixels. */
+  writableLeft: number; writableRight: number;
   source: "none" | "preset" | "detected" | "manual";
 }
 

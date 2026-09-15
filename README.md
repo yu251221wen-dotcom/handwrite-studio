@@ -1,6 +1,6 @@
-# 墨迹排版台 V4.0
+# 墨迹排版台 V4.1
 
-墨迹排版台是本地优先、可选在线临时会话的通用 DOCX 手写排版器。V4.0 延续无模板 DocumentBlock 唯一正式工作流，完成上传字体的 Canvas 真实加载校验，并增加水平横线检测、可视化和文字基线吸附；原有多页 Canvas、自然手写、逐行编辑、Undo/Redo 与高 DPI 导出均保留。
+墨迹排版台是本地优先、可选在线临时会话的通用 DOCX 手写排版器。V4.1 延续无模板 DocumentBlock 唯一正式工作流，并将检测到的水平纸线升级为分页与排版的纵向主坐标系；原有多页 Canvas、自然手写、逐行编辑、Undo/Redo 与高 DPI 导出均保留。
 
 ## Development Context
 
@@ -15,12 +15,21 @@ Before modifying this project, read:
 
 Do not duplicate long-term requirements in each development prompt.
 
-## V4.0 功能
+## V4.1 Background-aware Layout
+
+- 启用横线适配后，每行正文直接占用一个连续纸线槽位，不再先按普通 `autoY` 排版后就近吸附。
+- 普通段落、List 和诊断条目默认连续逐线书写；块间像素间距只会换算成跳过 0/1/N 条完整纸线。
+- 首条和末条可写横线决定每页可用槽位，槽位用完后由同一 Block-aware 引擎自动分页。
+- 横线检测同时估算可写左右边界；第一条可写横线、最后一条可写横线、左边界、右边界和整体基线偏移均可手动调整。
+- `manualOffsetX/Y`、字符 Seed、Block 来源索引和 Missing=0 完整性约束保持不变。
+- 没有启用横线的背景继续使用原有普通像素排版分支。
+
+## V4.0 基础能力
 
 - 上传 TTF/OTF 经过 `FontFace.load()`、`document.fonts.load()`、`document.fonts.ready` 和验收 Canvas 像素校验；失败时明确禁用，不允许静默回退。
 - 页面级横线适配保存检测开关、横线 Y 坐标、平均行距、置信度、吸附开关、整体 Y 偏移和辅助线显示状态。
 - 内置横线纸直接使用精确坐标；用户上传水平横线纸使用纯前端行投影检测，不引入 OpenCV 或新的部署依赖。
-- 基线位置使用 `autoY + lineSnapOffset + manualOffsetY`，换 Seed 不改变吸附位置，拖动行仍只修改手动偏移。
+- 基线位置使用 `autoY + lineSnapOffset + manualOffsetY`；V4.1 纸线槽位分支直接把 `autoY` 放在目标纸线基线上。换 Seed 不改变位置，拖动行仍只修改手动偏移。
 - 支持自动检测、开启/关闭吸附、行距/Y 偏移校准、添加/删除横线、重置和字号/行距建议；检测辅助线不会进入 PNG/PDF。
 - List/诊断 Block 使用更紧凑的专用行距，普通正文排版不变。
 
@@ -109,4 +118,4 @@ pnpm build
 
 当前限制：自动排版后手工改页次可保存，但再次全局重排会重建自动页顺序；跨软件关闭的草稿恢复受浏览器 Session 生命周期限制，请使用保存 JSON；字体依赖本机已安装字体或用户上传，跨设备应上传同一字体以保持视觉一致。高 DPI 导出按页串行绘制，耗时与页数相关。
 
-OCR、PaddleOCR、扫描 PDF OCR、AI/LLM 字段匹配、Hough Transform、自动透视校正、四角透视拖拽、弯曲纸张、SVG Path 笔画扰动、自动涂改、圈画与 AI 生成笔迹仍未实现。V4.0 横线检测只支持无透视、基本水平的横线纸。
+OCR、PaddleOCR、扫描 PDF OCR、AI/LLM 字段匹配、Hough Transform、自动透视校正、四角透视拖拽、弯曲纸张、SVG Path 笔画扰动、自动涂改、圈画与 AI 生成笔迹仍未实现。V4.1 横线检测只支持无透视、基本水平的横线纸。

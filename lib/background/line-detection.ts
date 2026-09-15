@@ -8,6 +8,10 @@ export const DEFAULT_LINE_DETECTION: HorizontalLineDetection = {
   snapEnabled: false,
   offsetY: -2,
   showLines: false,
+  firstUsableLine: 0,
+  lastUsableLine: -1,
+  writableLeft: 58,
+  writableRight: 537,
   source: "none",
 };
 
@@ -21,6 +25,8 @@ export interface HorizontalLineResult {
   lineY: number[];
   averageSpacing: number;
   confidence: number;
+  writableLeft?: number;
+  writableRight?: number;
 }
 
 function median(values: number[]): number {
@@ -53,6 +59,28 @@ function mergeNearbyCandidates(candidates: Array<{ y: number; score: number }>):
     }
   }
   return merged;
+}
+
+function detectWritableBounds(image: PixelBuffer, lines: number[]): { writableLeft: number; writableRight: number } {
+  const { data, width, height } = image;
+  const votes = Array.from({ length: width }, () => 0);
+  for (const value of lines) {
+    const y = Math.max(2, Math.min(height - 3, Math.round(value)));
+    for (let x = 2; x < width - 2; x += 1) {
+      const row = luminance(data, (y * width + x) * 4);
+      const around = (luminance(data, ((y - 2) * width + x) * 4) + luminance(data, ((y + 2) * width + x) * 4)) / 2;
+      if (around - row > 1.6) votes[x] += 1;
+    }
+  }
+  const minimumVotes = Math.max(2, Math.ceil(lines.length * 0.3));
+  const active = votes.flatMap((count, x) => count >= minimumVotes ? [x] : []);
+  if (active.length < width * 0.2) return { writableLeft: 58, writableRight: width - 58 };
+  const left = active[0];
+  const right = active.at(-1)!;
+  return {
+    writableLeft: Math.max(24, Math.min(width - 84, left + 6)),
+    writableRight: Math.max(84, Math.min(width - 24, right - 6)),
+  };
 }
 
 /**
@@ -131,7 +159,7 @@ export function detectHorizontalLines(image: PixelBuffer): HorizontalLineResult 
   const countScore = Math.min(1, (lines.length - 1) / 5);
   const confidence = Math.round(Math.max(0, Math.min(1, regularity * 0.5 + signal * 0.25 + countScore * 0.25)) * 100) / 100;
   if (lines.length < 3 || confidence < 0.35) return { lineY: [], averageSpacing: finalSpacing, confidence };
-  return { lineY: lines, averageSpacing: finalSpacing, confidence };
+  return { lineY: lines, averageSpacing: finalSpacing, confidence, ...detectWritableBounds(image, lines) };
 }
 
 export function presetHorizontalLines(asset: BackgroundAsset, height = 842): HorizontalLineResult {
@@ -141,6 +169,8 @@ export function presetHorizontalLines(asset: BackgroundAsset, height = 842): Hor
     lineY: Array.from({ length: Math.floor((height - 1) / spacing) }, (_, index) => spacing * (index + 1)),
     averageSpacing: spacing,
     confidence: 1,
+    writableLeft: 58,
+    writableRight: 537,
   };
 }
 
@@ -152,6 +182,10 @@ export function normalizeLineDetection(value?: Partial<HorizontalLineDetection>)
     lineY: lines,
     averageSpacing: Math.max(12, Math.min(120, Number(value?.averageSpacing) || averageSpacing(lines))),
     confidence: Math.max(0, Math.min(1, Number(value?.confidence) || 0)),
+    firstUsableLine: Math.max(0, Math.round(Number(value?.firstUsableLine) || 0)),
+    lastUsableLine: Number.isFinite(value?.lastUsableLine) ? Math.round(Number(value?.lastUsableLine)) : -1,
+    writableLeft: Math.max(0, Math.min(534, Number.isFinite(value?.writableLeft) ? Number(value?.writableLeft) : DEFAULT_LINE_DETECTION.writableLeft)),
+    writableRight: Math.max(60, Math.min(595, Number.isFinite(value?.writableRight) ? Number(value?.writableRight) : DEFAULT_LINE_DETECTION.writableRight)),
   };
 }
 
@@ -184,26 +218,12 @@ interface PaperLineCandidate {
   index: number;
 }
 
-function completePaperGrid(detection: HorizontalLineDetection, automaticY: number[]): PaperLineCandidate[] {
-  const spacing = detection.averageSpacing;
-  const raw = detection.lineY.map((y, index) => ({ y, index }));
-  if (!raw.length) return [];
-  const minimum = Math.min(...automaticY, raw[0].y);
-  const maximum = Math.max(...automaticY, raw.at(-1)!.y);
-  const completed = [...raw];
-  for (let y = raw[0].y - spacing, index = -1; y >= minimum - spacing * 0.55; y -= spacing, index -= 1) {
-    completed.unshift({ y: Math.round(y * 10) / 10, index });
-  }
-  for (let y = raw.at(-1)!.y + spacing, index = raw.length; y <= maximum + spacing * 0.55; y += spacing, index += 1) {
-    completed.push({ y: Math.round(y * 10) / 10, index });
-  }
-  // Older projects may contain a cropped detection list. Extend the same paper
-  // grid just far enough to keep every document row uniquely assigned.
-  while (completed.length < automaticY.length) {
-    const last = completed.at(-1)!;
-    completed.push({ y: Math.round((last.y + spacing) * 10) / 10, index: last.index + 1 });
-  }
-  return completed;
+function completePaperGrid(detection: HorizontalLineDetection): PaperLineCandidate[] {
+  if (!detection.lineY.length) return [];
+  const first = Math.max(0, Math.min(detection.lineY.length - 1, detection.firstUsableLine));
+  const requestedLast = detection.lastUsableLine < 0 ? detection.lineY.length - 1 : detection.lastUsableLine;
+  const last = Math.max(first, Math.min(detection.lineY.length - 1, requestedLast));
+  return detection.lineY.slice(first, last + 1).map((y, offset) => ({ y, index: first + offset }));
 }
 
 /**
@@ -212,7 +232,7 @@ function completePaperGrid(detection: HorizontalLineDetection, automaticY: numbe
  * rule index, so two rows can never collapse onto one physical rule.
  */
 function monotonicPaperAssignment(automaticY: number[], detection: HorizontalLineDetection): PaperLineCandidate[] {
-  const candidates = completePaperGrid(detection, automaticY);
+  const candidates = completePaperGrid(detection);
   const rowCount = automaticY.length;
   const candidateCount = candidates.length;
   if (!rowCount || candidateCount < rowCount) return [];

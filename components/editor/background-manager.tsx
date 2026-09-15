@@ -21,7 +21,7 @@ function thumbStyle(asset: BackgroundAsset) {
 }
 
 function Adjustment({ label, value, min, max, unit, onChange }: { label: string; value: number; min: number; max: number; unit: string; onChange: (value: number) => void }) {
-  return <div className="space-y-2"><div className="flex justify-between text-xs text-slate-500"><span>{label}</span><span>{value}{unit}</span></div><Slider value={[value]} min={min} max={max} onValueChange={(next) => onChange(Number(next[0]))} /></div>;
+  return <div className="space-y-2"><div className="flex justify-between text-xs text-slate-500"><span>{label}</span><span>{value}{unit}</span></div><Slider aria-label={label} value={[value]} min={min} max={max} onValueChange={(next) => onChange(Number(next[0]))} /></div>;
 }
 
 export function BackgroundManager({ backgrounds, selectedId, adjustments, transform, lineDetection, snapDiagnostics, detecting, onSelect, onAdjust, onTransform, onLineDetection, onDetectLines, onApplySuggestedLayout, onApplyToAll, onUploaded }: { backgrounds: BackgroundAsset[]; selectedId: string; adjustments: BackgroundAdjustments; transform: BackgroundTransform; lineDetection: HorizontalLineDetection; snapDiagnostics: LineSnapDiagnostic[]; detecting: boolean; onSelect: (id: string) => void; onAdjust: (value: BackgroundAdjustments) => void; onTransform: (value: BackgroundTransform) => void; onLineDetection: (value: HorizontalLineDetection) => void; onDetectLines: () => void; onApplySuggestedLayout: (fontSize: number, lineHeight: number) => void; onApplyToAll: () => void; onUploaded: (asset: BackgroundAsset) => void }) {
@@ -41,6 +41,9 @@ export function BackgroundManager({ backgrounds, selectedId, adjustments, transf
   const set = (key: keyof BackgroundAdjustments, value: number) => onAdjust({ ...adjustments, [key]: value });
   const suggestedFontSize = Math.max(12, Math.min(28, Math.round(lineDetection.averageSpacing * 0.43)));
   const suggestedLineHeight = Math.max(28, Math.min(72, Math.round(lineDetection.averageSpacing)));
+  const firstUsableLine = Math.max(0, Math.min(Math.max(0, lineDetection.lineY.length - 1), lineDetection.firstUsableLine));
+  const lastUsableLine = Math.max(firstUsableLine, Math.min(Math.max(0, lineDetection.lineY.length - 1), lineDetection.lastUsableLine < 0 ? lineDetection.lineY.length - 1 : lineDetection.lastUsableLine));
+  const usableLineCount = lineDetection.lineY.length ? lastUsableLine - firstUsableLine + 1 : 0;
   const updateDetection = (patch: Partial<HorizontalLineDetection>) => onLineDetection({ ...lineDetection, ...patch });
   const addLine = () => {
     const last = lineDetection.lineY.at(-1) ?? 60;
@@ -72,10 +75,17 @@ export function BackgroundManager({ backgrounds, selectedId, adjustments, transf
           <div className="flex items-center justify-between text-xs text-slate-600"><span>显示检测线</span><Switch disabled={!lineDetection.enabled || !lineDetection.lineY.length} checked={lineDetection.showLines} onCheckedChange={(showLines) => updateDetection({ showLines })} /></div>
           <Adjustment label="检测行距" value={Math.round(lineDetection.averageSpacing)} min={18} max={90} unit=" px" onChange={(averageSpacing) => updateDetection({ averageSpacing, source: "manual", lineY: respaceHorizontalLines(lineDetection.lineY, averageSpacing) })} />
           <Adjustment label="整体 Y 偏移" value={lineDetection.offsetY} min={-20} max={20} unit=" px" onChange={(offsetY) => updateDetection({ offsetY, source: "manual" })} />
+          {lineDetection.lineY.length > 0 && <div className="space-y-3 rounded-lg bg-white p-2">
+            <div className="text-[11px] text-slate-500">可写区域 Y {Math.round(lineDetection.lineY[firstUsableLine])}–{Math.round(lineDetection.lineY[lastUsableLine])} · {usableLineCount} 条纸线</div>
+            <Adjustment label="第一条可写横线" value={firstUsableLine + 1} min={1} max={lineDetection.lineY.length} unit="" onChange={(value) => updateDetection({ firstUsableLine: Math.min(value - 1, lastUsableLine), source: "manual" })} />
+            <Adjustment label="最后一条可写横线" value={lastUsableLine + 1} min={1} max={lineDetection.lineY.length} unit="" onChange={(value) => updateDetection({ lastUsableLine: Math.max(value - 1, firstUsableLine), source: "manual" })} />
+            <Adjustment label="左边界" value={Math.round(lineDetection.writableLeft)} min={0} max={520} unit=" px" onChange={(writableLeft) => updateDetection({ writableLeft: Math.min(writableLeft, lineDetection.writableRight - 60), source: "manual" })} />
+            <Adjustment label="右边界" value={Math.round(lineDetection.writableRight)} min={75} max={595} unit=" px" onChange={(writableRight) => updateDetection({ writableRight: Math.max(writableRight, lineDetection.writableLeft + 60), source: "manual" })} />
+          </div>}
           {lineDetection.lineY.length > 0 && <div className="flex items-center justify-between rounded-lg bg-white px-2 py-2 text-[11px] text-slate-500"><span>建议：字号 {suggestedFontSize} · 行距 {suggestedLineHeight}</span><button className="font-medium text-[#287e86]" onClick={() => onApplySuggestedLayout(suggestedFontSize, suggestedLineHeight)}>应用建议</button></div>}
           {lineDetection.lineY.length > 0 && <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg bg-white p-2">{lineDetection.lineY.map((line, index) => <div key={`${line}-${index}`} className="flex items-center justify-between text-[11px] text-slate-500"><span>横线 {index + 1} · Y {Math.round(line)}</span><button aria-label={`删除横线 ${index + 1}`} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" onClick={() => updateDetection({ source: "manual", lineY: lineDetection.lineY.filter((_, itemIndex) => itemIndex !== index) })}><Trash2 className="size-3" /></button></div>)}</div>}
           {snapDiagnostics.length > 0 && <div className="rounded-lg border border-emerald-100 bg-emerald-50/70 p-2 text-[11px] text-slate-600">
-            <div className="mb-1 flex items-center justify-between font-medium text-emerald-800"><span>单调一一匹配</span><span>重复分配 0</span></div>
+            <div className="mb-1 flex items-center justify-between font-medium text-emerald-800"><span>纸线槽位布局</span><span>重复分配 0</span></div>
             <div className="max-h-28 space-y-1 overflow-y-auto">{snapDiagnostics.map((item, index) => <div key={item.lineId} className="grid grid-cols-[1fr_auto] gap-2"><span>文字行 {index + 1} → 纸线 {item.paperLineIndex + 1}</span><span className="tabular-nums">基线 {item.baselineY.toFixed(1)} / 纸线 {item.paperLineY.toFixed(1)} · Δ {item.difference >= 0 ? "+" : ""}{item.difference.toFixed(1)}</span></div>)}</div>
           </div>}
           <div className="grid grid-cols-2 gap-2"><Button variant="outline" size="sm" onClick={addLine}><Plus />添加横线</Button><Button variant="outline" size="sm" onClick={() => onLineDetection({ ...DEFAULT_LINE_DETECTION })}><RotateCcw />重置</Button></div>
