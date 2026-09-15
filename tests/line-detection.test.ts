@@ -94,6 +94,21 @@ test("snapping preserves manual offsets and cannot alter deterministic handwriti
   assert.equal(characterStateKey(line, options), characterStateKey(snapped.lines[0], { ...options, page: snapped }));
 });
 
+test("two document lines can never overprint on the same detected paper rule", () => {
+  const lines = [57, 91, 125, 159, 193, 227, 261, 295, 329].map((autoY, index) => ({
+    ...line, id: `line-${index}`, autoY, manualOffsetY: index === 4 ? 7 : 0,
+  }));
+  const ruledPage = { ...page, lines };
+  const detection = { ...DEFAULT_LINE_DETECTION, enabled: true, snapEnabled: true,
+    lineY: [45, 90, 135, 180, 225, 270, 315, 360], averageSpacing: 45, offsetY: -2, confidence: 1, source: "preset" as const };
+  const snapped = applyLineSnapping(ruledPage, detection);
+  const automaticBaselines = snapped.lines.map((item) => item.autoY + (item.lineSnapOffset ?? 0));
+  assert.equal(new Set(automaticBaselines).size, automaticBaselines.length);
+  assert.equal(snapped.lines[3].lineSnapOffset, 0);
+  assert.equal(snapped.lines[4].lineSnapOffset, 0);
+  assert.equal(snapped.lines[4].manualOffsetY, 7);
+});
+
 test("applying an uploaded font changes real line font ids without moving line coordinates", () => {
   const updated = applyFontToPages([page], "font-uploaded-test");
   assert.equal(updated[0].lines[0].fontId, "font-uploaded-test");

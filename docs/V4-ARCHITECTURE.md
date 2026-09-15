@@ -40,7 +40,7 @@ snapEnabled / offsetY / showLines / source
 finalY = autoY + lineSnapOffset + manualOffsetY
 ```
 
-重新检测或手动校准横线只重算 `lineSnapOffset`，不会覆盖自动布局坐标或用户拖动产生的 `manualOffsetY`。字符随机 key 仍只依赖文档、Block/字段、原文字符索引、字体、Seed 和手写参数，不依赖页码、坐标或背景，因此分页、拖动、换背景和横线吸附不会重生成笔迹。
+重新检测或手动校准横线只重算 `lineSnapOffset`，不会覆盖自动布局坐标或用户拖动产生的 `manualOffsetY`。如果文档行距与纸张行距不兼容、导致两条相邻文本行命中同一条纸线，冲突组会自动退回原始 `autoY` 间距，避免重叠；界面仍提供匹配纸线间距的布局建议。字符随机 key 仍只依赖文档、Block/字段、原文字符索引、字体、Seed 和手写参数，不依赖页码、坐标或背景，因此分页、拖动、换背景和横线吸附不会重生成笔迹。
 
 检测辅助线只在编辑器预览背景层显示。`renderCompositeCanvas()` 会强制关闭选择框和辅助线，因此 PNG、JPG、PDF 保持干净。
 

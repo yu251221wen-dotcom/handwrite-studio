@@ -172,9 +172,27 @@ export function snapOffsetForLine(autoY: number, detection?: HorizontalLineDetec
 
 export function applyLineSnapping(page: PageState, value: HorizontalLineDetection): PageState {
   const lineDetection = normalizeLineDetection(value);
+  const offsets = page.lines.map((line) => snapOffsetForLine(line.autoY, lineDetection));
+
+  // Different document line heights can map two adjacent text lines onto the
+  // same paper rule. Keep both lines at their original automatic spacing in
+  // that case instead of producing unreadable overprint. Manual offsets remain
+  // independent and are never considered or overwritten here.
+  const ordered = page.lines.map((line, index) => ({ index, line })).sort((left, right) => left.line.autoY - right.line.autoY);
+  const conflicted = new Set<number>();
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1];
+    const current = ordered[index];
+    const previousTarget = previous.line.autoY + offsets[previous.index];
+    const currentTarget = current.line.autoY + offsets[current.index];
+    if (Math.abs(currentTarget - previousTarget) < 0.5) {
+      conflicted.add(previous.index);
+      conflicted.add(current.index);
+    }
+  }
   return {
     ...page,
     lineDetection,
-    lines: page.lines.map((line) => ({ ...line, lineSnapOffset: snapOffsetForLine(line.autoY, lineDetection) })),
+    lines: page.lines.map((line, index) => ({ ...line, lineSnapOffset: conflicted.has(index) ? 0 : offsets[index] })),
   };
 }
