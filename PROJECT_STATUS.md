@@ -78,6 +78,8 @@
 - [x] 长段落剩余页空间利用优化
 - [x] 固定标题栏与三栏独立滚动
 - [x] Template Mapping production path removed / disabled
+- [x] Cloudflare Pages production frontend
+- [x] Railway exact-origin CORS for the Pages frontend
 - [ ] V3.1 clean-room
 
 勾选依据为当前源码实现及最近验收记录；不代表暂缓路线功能已经完成。
@@ -96,9 +98,9 @@
 
 ## 当前最高优先级
 
-当前阶段：V3.1.1 公网前端迁移
+当前阶段：V3.1.1 公网部署验收已完成
 
-1. 将已被移动网络拦截的旧 `chatgpt.site` 前端迁移到 Cloudflare Pages
+1. Cloudflare Pages 正式前端保持可用
 2. 保持 Session isolation、精确 CORS 和 `/health`
 3. 保持 Golden Test Missing = 0
 4. 不破坏当前 V3.1.1 功能
@@ -108,7 +110,7 @@
 
 ## 下一阶段
 
-先完成 Cloudflare Pages 公网部署、Railway 精确 CORS 更新和真实公网验收；其后才进入 V4 横线纸自动检测与文字基线吸附。暂时不要提前开发 OCR、透视或 AI 字形。
+Cloudflare Pages 公网部署、Railway 精确 CORS 更新和真实公网验收已经完成。下一阶段才进入 V4 横线纸自动检测与文字基线吸附；暂时不要提前开发 OCR、透视或 AI 字形。
 
 ---
 
@@ -122,12 +124,14 @@
 - Cloudflare Pages 静态导出：通过；4 个正式路由均生成到 `out/`，生产 API 地址已写入浏览器产物
 - FastAPI health：通过，`status=ok`、`version=3.1.1`
 - Golden Test：Raw 3657 / Laid out 3657 / Missing 0；实际 Canvas `fillText` 覆盖率通过
-- 公网 DOCX：合成长文档 Raw 3097，DocumentBlock 5，弃用字段映射结果 0
-- 公网 Session isolation：同一项目 Session A 读取 200，Session B 读取 404
+- 公网 DOCX：合成长文档 Raw 3097 / Laid out 3097 / Missing 0，DocumentBlock 5，自动排版 7 页
+- 公网 Session isolation：新浏览器会话未读取到另一会话上传的字体、背景或长文档状态
 - 公网 CORS：正式前端 Origin 允许，预检 200，`X-Session-ID` 已允许
 - 公网资源：TTF 与合成 PNG 上传成功；返回 URL 为直接 HTTPS；文件响应 200 且 CORS 精确匹配正式前端
-- 公网 PDF：三张 2480 × 3508 页面导出 HTTP 200，实测 PDF 3 页、A4 MediaBox
-- UI：body 不滚动，标题栏固定；左/右栏独立滚动；字体 30 资源位、背景 30 预设均可见；控制台 0 error/warning
+- 公网 PNG：实测下载图片为 2480 × 3508 px（A4 300 DPI）
+- 公网 PDF：长文档实测导出 7 页，程序读取页数为 7，页面为 A4 MediaBox
+- UI：body 不滚动，标题栏固定；左/右栏独立滚动；字体 30 资源位、背景 30 预设均可见；390 × 844 视口无横向页面溢出；控制台 0 error/warning
+- Cloudflare Pages：4 个正式路由 `/`、`/font-library/`、`/background-library/`、`/showcase/` 均为 HTTP 200
 - Clean-room：V3.0 最近一次通过；V3.1 尚未重新打包和执行 clean-room
 
 V3.1 本轮完整源码测试已通过；正式 ZIP 与 clean-room 将在部署授权和本轮交付打包时更新。
@@ -154,18 +158,18 @@ V3.1 本轮完整源码测试已通过；正式 ZIP 与 clean-room 将在部署�
 
 ## 当前公网地址
 
-- Frontend：待 Cloudflare Pages 授权和部署；旧 `chatgpt.site` 因移动网络 Cloudflare block 不再作为正式入口
+- Frontend：`https://handwrite-studio.pages.dev/`
 - API：`https://handwrite-studio-api-production.up.railway.app`
 - Health：`https://handwrite-studio-api-production.up.railway.app/health`（HTTP 200，`status=ok`、`version=3.1.1`、`environment=production`）
-- Showcase：待新 `*.pages.dev/showcase/` 地址生成
+- Showcase：`https://handwrite-studio.pages.dev/showcase/`
 
 ---
 
 ## 当前部署状态
 
-Railway FastAPI production 后端已部署成功：服务 `handwrite-studio-api`，V3.1.1 实现提交 `8efd99cd2892f526eda2a3a2deb21d4693862bb6`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。Render 因绑卡要求停用。
+Railway FastAPI production 后端已部署成功：服务 `handwrite-studio-api`，V3.1.1 实现提交 `8efd99cd2892f526eda2a3a2deb21d4693862bb6`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。`ALLOWED_ORIGINS` 已精确设置为 `https://handwrite-studio.pages.dev`，预检返回 200。Render 因绑卡要求停用。
 
-Cloudflare Pages 静态部署配置已准备并完成本地构建验证，等待用户完成 Cloudflare 账号登录/授权后创建标准 Pages 项目。生产构建使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app`。获得新域名后，必须把 Railway `ALLOWED_ORIGINS` 更新为新的精确 HTTPS Origin；当前值仍是已停用的旧前端 Origin。
+Cloudflare Pages production 前端已部署成功：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。移动端标题栏修复提交 `6323ab5` 已自动部署。
 
 ---
 
@@ -173,7 +177,7 @@ Cloudflare Pages 静态部署配置已准备并完成本地构建验证，等待
 
 - Cloudflare / Vite 开发运行时可能在类型初始化时出现 `fetch failed` / `ECONNRESET`；production build 和本地生产预览稳定
 - 旧 `chatgpt.site` 在手机移动网络触发 Cloudflare block，已停止作为正式公网入口
-- Cloudflare Pages 尚待账号登录/授权，新的 `pages.dev` 域名和公网端到端验收尚未完成
+- Cloudflare Pages 已完成桌面浏览器及 390 × 844 移动视口验收；真实蜂窝移动网络仍需用户在手机实机打开正式域名确认
 - 旧字段布局引擎与字段映射模块仍作为迁移兼容源码保留，但没有正式运行入口
 - 自动排版后手工改页次可保存，但再次全局重排会重建自动页顺序
 - 跨软件关闭的草稿恢复受浏览器 Session 生命周期限制，应使用项目 JSON
