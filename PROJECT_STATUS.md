@@ -180,7 +180,7 @@ V4.0 完整源码测试与公网验收已通过；正式 ZIP 与 clean-room 需�
 
 Railway FastAPI production 后端已部署 V4.0：服务 `handwrite-studio-api`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。`ALLOWED_ORIGINS` 精确设置为 `https://handwrite-studio.pages.dev`。Render 因绑卡要求停用。
 
-Cloudflare Pages production 前端已部署 V4.0：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。当前 production deployment 为提交 `41ebf6e`，预览部署 URL 为 `https://2dcb9e6d.handwrite-studio.pages.dev`。
+Cloudflare Pages production 前端已部署 V4.0：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。V4 运行时代码基线为提交 `41ebf6e`，对应预览部署 URL 为 `https://2dcb9e6d.handwrite-studio.pages.dev`；其后的验收文档提交不改变运行时代码。
 
 ---
 
