@@ -65,19 +65,35 @@
     "line": {
       "type": "object",
       "properties": {
-        "sourceCharacterIndices": { "type": "array", "items": { "type": "integer", "minimum": -1 } }
+        "sourceCharacterIndices": { "type": "array", "items": { "type": "integer", "minimum": -1 } },
+        "lineSnapOffset": { "type": "number" }
       },
       "required": ["id", "pageId", "fieldId", "label", "text", "startIndex", "endIndex", "autoX", "autoY", "manualOffsetX", "manualOffsetY", "rotation", "fontSize", "letterSpacing", "lineHeight", "fontId", "locked"]
     },
     "page": {
       "type": "object",
-      "required": ["pageId", "pageIndex", "templateId", "widthMm", "heightMm", "backgroundId", "backgroundAdjustments", "backgroundTransform", "lines"],
+      "required": ["pageId", "pageIndex", "templateId", "widthMm", "heightMm", "backgroundId", "backgroundAdjustments", "backgroundTransform", "lineDetection", "lines"],
       "properties": {
         "pageId": { "type": "string" }, "pageIndex": { "type": "integer", "minimum": 0 },
         "pageType": { "enum": ["first", "continuation", "blank", "custom"] },
         "pageTemplateId": { "type": ["string", "null"] }, "templateId": { "type": "string" },
         "widthMm": { "const": 210 }, "heightMm": { "const": 297 }, "backgroundId": { "type": "string" },
         "backgroundAdjustments": { "type": "object" }, "backgroundTransform": { "type": "object" },
+        "lineDetection": {
+          "type": "object",
+          "required": ["enabled", "lineY", "averageSpacing", "confidence", "snapEnabled", "offsetY", "showLines", "source"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "lineY": { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 842 } },
+            "averageSpacing": { "type": "number", "minimum": 12, "maximum": 120 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "snapEnabled": { "type": "boolean" },
+            "offsetY": { "type": "number" },
+            "showLines": { "type": "boolean" },
+            "source": { "enum": ["none", "preset", "detected", "manual"] }
+          },
+          "additionalProperties": false
+        },
         "blockIds": { "type": "array", "items": { "type": "string" } },
         "lines": { "type": "array", "items": { "$ref": "#/$defs/line" } }
       }

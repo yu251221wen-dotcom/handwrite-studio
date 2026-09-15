@@ -23,6 +23,7 @@ export const BACKGROUND_PRESETS: BackgroundAsset[] = [
   { id: "ruled-gray-42", name: "淡灰横线 42", kind: "preset", enabled: true, baseColor: "#ffffff", pattern: "ruled", lineColor: "#d6d9dc", spacing: 42 },
   { id: "ruled-gray-50", name: "淡灰横线 50", kind: "preset", enabled: true, baseColor: "#fdfdfc", pattern: "ruled", lineColor: "#cfd3d6", spacing: 50 },
   { id: "ruled-warm-46", name: "暖灰横线", kind: "preset", enabled: true, baseColor: "#fffaf0", pattern: "ruled", lineColor: "#ded2c2", spacing: 46 },
+  { id: "ruled-scan-noisy", name: "轻噪扫描横线纸", kind: "preset", enabled: true, baseColor: "#faf9f4", pattern: "ruled", lineColor: "#bdcbd1", spacing: 45, texture: 0.36, unevenLight: 0.08 },
   { id: "margin-blue", name: "蓝线作业纸", kind: "preset", enabled: true, baseColor: "#fffefa", pattern: "ruled", lineColor: "#b7d5e1", spacing: 48, marginLine: true },
   { id: "margin-gray", name: "灰线笔记纸", kind: "preset", enabled: true, baseColor: "#fcfcfa", pattern: "ruled", lineColor: "#d2d4d4", spacing: 44, marginLine: true },
   { id: "grid-blue-28", name: "淡蓝方格 28", kind: "preset", enabled: true, baseColor: "#fffef9", pattern: "grid", lineColor: "#c7dce5", spacing: 28 },

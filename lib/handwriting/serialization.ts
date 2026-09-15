@@ -2,6 +2,7 @@ import { DEFAULT_BACKGROUND_ADJUSTMENTS } from "./background-library.ts";
 import { DEFAULT_DOCUMENT_LAYOUT_SETTINGS } from "./types.ts";
 import type { DocumentBlock, FieldMapping, LineLayout, ProjectState, ProjectStateV1, ProjectStateV2 } from "./types.ts";
 import { mapSourceCharacters } from "./source-character-map.ts";
+import { applyLineSnapping, DEFAULT_LINE_DETECTION, normalizeLineDetection } from "../background/line-detection.ts";
 
 export function serializeProject(state: ProjectState): string {
   return JSON.stringify(disableLegacyTemplateState({ ...state, updatedAt: new Date().toISOString() }), null, 2);
@@ -10,11 +11,12 @@ export function serializeProject(state: ProjectState): string {
 function disableLegacyTemplateState(state: ProjectState): ProjectState {
   return {
     ...state,
-    projectVersion: "3.1.1",
+    projectVersion: "4.0.0",
     layoutMode: "no-template",
     templateId: null,
     mappedBlockIds: [],
     unmappedBlockIds: [],
+    pages: state.pages.map((page) => applyLineSnapping(page, normalizeLineDetection(page.lineDetection ?? DEFAULT_LINE_DETECTION))),
   };
 }
 
@@ -52,7 +54,8 @@ export function migrateProjectV1(old: ProjectStateV1): ProjectStateV2 {
     seed: old.seed, selectedFontId: old.selectedFontId, fieldMappings: fields,
     pages: [{ pageId, pageIndex: 0, templateId: "tcm-inpatient-first-v2", widthMm: 210, heightMm: 297,
       backgroundId: old.selectedBackgroundId, backgroundAdjustments: old.background ?? { ...DEFAULT_BACKGROUND_ADJUSTMENTS },
-      backgroundTransform: { fitMode: "cover", scale: 1, offsetX: 0, offsetY: 0 }, lines }],
+      backgroundTransform: { fitMode: "cover", scale: 1, offsetX: 0, offsetY: 0 },
+      lineDetection: { ...DEFAULT_LINE_DETECTION }, lines }],
     handwriting: old.handwriting, exportSettings: { pageSize: "A4", dpi: 300, format: "png", jpgQuality: 0.9 },
     updatedAt: old.updatedAt,
   };
@@ -70,13 +73,14 @@ export function migrateProjectV2(old: ProjectStateV2): ProjectState {
   });
   const blockByField = new Map(old.fieldMappings.map((field) => [field.id, `v2-field-${field.id}`]));
   return {
-    ...old, schemaVersion: 3, projectVersion: "3.1.1", layoutMode: "no-template",
+    ...old, schemaVersion: 3, projectVersion: "4.0.0", layoutMode: "no-template",
     noTemplateMode: "preserve-structure", templateId: null, documentBlocks,
     mappedBlockIds: [], unmappedBlockIds: [],
     explicitlyIgnoredBlockIds: [], documentLayoutSettings: { ...DEFAULT_DOCUMENT_LAYOUT_SETTINGS },
     fieldMappings: old.fieldMappings.map((field) => ({ ...field, sourceBlockIds: field.sourceBlockIds ?? [blockByField.get(field.id)!] })),
     pages: old.pages.map((page, pageIndex) => ({ ...page, pageIndex,
       pageType: pageIndex === 0 ? "first" : "continuation", pageTemplateId: page.templateId,
+      lineDetection: normalizeLineDetection(page.lineDetection ?? DEFAULT_LINE_DETECTION),
       blockIds: [...new Set(page.lines.map((line) => blockByField.get(line.fieldId)).filter((value): value is string => Boolean(value)))],
       lines: page.lines.map((line) => ({ ...line, blockId: blockByField.get(line.fieldId), blockType: "paragraph", visualKind: "text" })),
     })),

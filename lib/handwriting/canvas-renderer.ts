@@ -1,4 +1,5 @@
 import { renderBackground } from "./background-library.ts";
+import { assertFontReady, fontCssFamily } from "./font-library.ts";
 import { generateCharacterStates } from "./randomization.ts";
 import { lineX, lineY, type BackgroundAsset, type FontAsset, type HandwritingStyle, type LineLayout, type PageState } from "./types.ts";
 
@@ -21,6 +22,7 @@ export interface RenderOptions {
   selectedLineId?: string;
   backgroundImage?: CanvasImageSource;
   showSelection?: boolean;
+  showLineGuides?: boolean;
 }
 
 const stateCache = new Map<string, ReturnType<typeof generateCharacterStates>>();
@@ -82,7 +84,8 @@ function renderHeader(context: CanvasRenderingContext2D, options: RenderOptions)
   ] as const;
   for (const [label, value, x, y] of facts) {
     context.fillText(label, x, y);
-    context.save(); context.font = `13px ${options.font.family}`; context.fillStyle = options.handwriting.inkColor;
+    assertFontReady(options.font);
+    context.save(); context.font = `13px ${fontCssFamily(options.font)}`; context.fillStyle = options.handwriting.inkColor;
     context.fillText(value, x + 52, y); context.restore();
   }
 }
@@ -92,6 +95,21 @@ export function renderPageBackground(context: CanvasRenderingContext2D, options:
   renderBackground(context, options.background, options.page.backgroundAdjustments, PAGE_WIDTH, PAGE_HEIGHT,
     `paper:${options.page.pageId}`, options.backgroundImage, options.page.backgroundTransform);
   renderHeader(context, options);
+  const detection = options.page.lineDetection;
+  if (options.showLineGuides && detection?.enabled && detection.showLines) {
+    context.save();
+    context.strokeStyle = "rgba(225,72,94,.72)";
+    context.fillStyle = "rgba(225,72,94,.9)";
+    context.lineWidth = 0.8;
+    context.setLineDash([5, 4]);
+    context.font = "9px sans-serif";
+    for (const line of detection.lineY) {
+      const y = line + detection.offsetY;
+      context.beginPath(); context.moveTo(10, y); context.lineTo(PAGE_WIDTH - 10, y); context.stroke();
+      context.fillText(Math.round(y).toString(), 12, y - 2);
+    }
+    context.restore();
+  }
 }
 
 export function renderTextLayer(context: CanvasRenderingContext2D, options: RenderOptions, clear = true): LineBounds[] {
@@ -100,7 +118,10 @@ export function renderTextLayer(context: CanvasRenderingContext2D, options: Rend
   const bounds: LineBounds[] = [];
   for (const line of options.page.lines) {
     const states = cachedStates(line, options);
-    const lineFont = options.fonts?.find((font) => font.id === line.fontId) ?? options.font;
+    const matchedFont = options.fonts?.find((font) => font.id === line.fontId);
+    if (options.fonts && !matchedFont) throw new Error(`行 ${line.id} 引用的字体 ${line.fontId} 不可用，已阻止系统字体回退`);
+    const lineFont = matchedFont ?? options.font;
+    assertFontReady(lineFont);
     let cursor = 0; let columnIndex = 0; const x = lineX(line); const y = lineY(line);
     context.save(); context.translate(x, y); context.rotate(line.rotation * Math.PI / 180);
     if (line.visualKind === "table" && line.columnWidths?.length) {
@@ -115,7 +136,7 @@ export function renderTextLayer(context: CanvasRenderingContext2D, options: Rend
         continue;
       }
       const size = line.fontSize * state.fontSizeScale;
-      context.font = `${size}px ${lineFont.family}`;
+      context.font = `${size}px ${fontCssFamily(lineFont)}`;
       const measured = context.measureText(state.character).width;
       context.save(); context.translate(cursor + state.offsetX, state.offsetY + state.baselineOffset);
       context.rotate(state.rotation * Math.PI / 180); context.scale(state.scaleX, state.scaleY);
@@ -144,5 +165,6 @@ export function renderCompositeCanvas(canvas: HTMLCanvasElement, options: Render
   canvas.width = widthPx; canvas.height = heightPx;
   const context = canvas.getContext("2d"); if (!context) return;
   context.setTransform(widthPx / PAGE_WIDTH, 0, 0, heightPx / PAGE_HEIGHT, 0, 0);
-  renderPageBackground(context, options); renderTextLayer(context, { ...options, showSelection: false }, false);
+  const exportOptions = { ...options, showSelection: false, showLineGuides: false };
+  renderPageBackground(context, exportOptions); renderTextLayer(context, exportOptions, false);
 }

@@ -1,5 +1,6 @@
 import type { PageState } from "../handwriting/types.ts";
 import { DEFAULT_ADJUSTMENTS, DEFAULT_TRANSFORM } from "../layout/paginator.ts";
+import { DEFAULT_LINE_DETECTION, normalizeLineDetection } from "../background/line-detection.ts";
 
 function reindex(pages: PageState[]): PageState[] {
   return pages.map((page, pageIndex) => ({ ...page, pageIndex }));
@@ -20,6 +21,7 @@ export function addBlankPage(pages: PageState[], afterIndex = pages.length - 1):
     backgroundId: reference?.backgroundId ?? "white-clean",
     backgroundAdjustments: reference?.backgroundAdjustments ? { ...reference.backgroundAdjustments } : { ...DEFAULT_ADJUSTMENTS },
     backgroundTransform: reference?.backgroundTransform ? { ...reference.backgroundTransform } : { ...DEFAULT_TRANSFORM },
+    lineDetection: normalizeLineDetection(reference?.lineDetection ?? DEFAULT_LINE_DETECTION),
     blockIds: [], lines: [],
   };
   const result = [...pages]; result.splice(afterIndex + 1, 0, page); return reindex(result);
@@ -32,6 +34,7 @@ export function duplicatePage(pages: PageState[], pageId: string): PageState[] {
   const duplicate: PageState = {
     ...source, pageId: duplicateId, pageType: "custom", pageTemplateId: source.pageTemplateId ?? null,
     backgroundAdjustments: { ...source.backgroundAdjustments }, backgroundTransform: { ...source.backgroundTransform },
+    lineDetection: normalizeLineDetection(source.lineDetection ?? DEFAULT_LINE_DETECTION),
     blockIds: [...(source.blockIds ?? [])],
     lines: source.lines.map((line) => ({ ...line, id: `${line.id}:copy:${duplicateId}`, pageId: duplicateId })),
   };

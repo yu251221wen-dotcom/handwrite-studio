@@ -5,7 +5,7 @@ import { Check, Plus, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api/client";
-import { FONT_PREVIEW_LINES, loadUploadedFont } from "@/lib/handwriting/font-library";
+import { FONT_PREVIEW_LINES, fontCssFamily, loadUploadedFont } from "@/lib/handwriting/font-library";
 import type { FontAsset } from "@/lib/handwriting/types";
 
 export function FontManager({ fonts, selectedId, onSelect, onUploaded }: { fonts: FontAsset[]; selectedId: string; onSelect: (id: string) => void; onUploaded: (asset: FontAsset) => void }) {
@@ -22,7 +22,7 @@ export function FontManager({ fonts, selectedId, onSelect, onUploaded }: { fonts
       if (!response.ok) throw new Error(String((await response.json() as { detail?: string }).detail ?? "字体上传失败"));
       const asset = await response.json() as FontAsset;
       await loadUploadedFont(asset);
-      onUploaded(asset); onSelect(asset.id); setStatus(`已启用 ${asset.name}`);
+      onUploaded(asset); setStatus(`字体真正加载成功：${asset.name}`);
     } catch (error) { setStatus(error instanceof Error ? error.message : "字体上传失败"); }
     event.target.value = "";
   };
@@ -35,7 +35,7 @@ export function FontManager({ fonts, selectedId, onSelect, onUploaded }: { fonts
         {fonts.map((font) => (
           <button key={font.id} disabled={!font.enabled} onClick={() => font.enabled ? onSelect(font.id) : input.current?.click()} className={`w-full rounded-xl border p-3 text-left transition ${selectedId === font.id ? "border-[#287e86] bg-[#eff9f8]" : font.enabled ? "border-slate-200 bg-white hover:border-slate-300" : "border-dashed border-slate-200 bg-slate-50 opacity-65"}`}>
             <div className="mb-2 flex items-center justify-between"><span className="text-xs font-medium text-slate-600">{font.previewName}</span>{selectedId === font.id ? <Check className="size-3.5 text-[#287e86]" /> : !font.enabled ? <Plus className="size-3.5 text-slate-400" /> : null}</div>
-            {font.enabled ? <div style={{ fontFamily: font.family }} className="space-y-1 text-[17px] leading-6 text-slate-800"><p>{FONT_PREVIEW_LINES[0]}</p><p>{FONT_PREVIEW_LINES[1]}</p></div> : <p className="text-xs text-slate-400">资源位 {font.slot} · 点击上传</p>}
+            {font.enabled ? <div style={{ fontFamily: fontCssFamily(font) }} className="space-y-1 text-[17px] leading-6 text-slate-800"><p>{FONT_PREVIEW_LINES[0]}</p><p>{FONT_PREVIEW_LINES[1]}</p></div> : <p className={`text-xs ${font.loadError ? "text-rose-600" : "text-slate-400"}`}>{font.loadError ?? `资源位 ${font.slot} · 等待上传`}</p>}
           </button>
         ))}
       </div>

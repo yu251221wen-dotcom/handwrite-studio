@@ -11,7 +11,7 @@ export type PageType = "first" | "continuation" | "blank" | "custom";
 export interface FontAsset {
   id: string; name: string; previewName: string; family: string;
   kind: "system" | "uploaded" | "slot"; enabled: boolean; slot: number;
-  fileUrl?: string; filePath?: string; license?: string;
+  fileUrl?: string; filePath?: string; license?: string; loadError?: string;
 }
 
 export type BackgroundPattern = "solid" | "ruled" | "grid" | "dots" | "ledger";
@@ -28,6 +28,12 @@ export interface BackgroundAdjustments {
 }
 export interface BackgroundTransform {
   fitMode: BackgroundFitMode; scale: number; offsetX: number; offsetY: number;
+}
+
+export interface HorizontalLineDetection {
+  enabled: boolean; lineY: number[]; averageSpacing: number; confidence: number;
+  snapEnabled: boolean; offsetY: number; showLines: boolean;
+  source: "none" | "preset" | "detected" | "manual";
 }
 
 export interface RandomizationConfig {
@@ -91,7 +97,7 @@ export interface DocumentLayoutSettings {
 export interface LineLayout {
   id: string; pageId: string; fieldId: string; label: string; text: string;
   startIndex: number; endIndex: number; autoX: number; autoY: number;
-  manualOffsetX: number; manualOffsetY: number; rotation: number; fontSize: number;
+  manualOffsetX: number; manualOffsetY: number; lineSnapOffset?: number; rotation: number; fontSize: number;
   letterSpacing: number; lineHeight: number; fontId: string; locked: boolean;
   blockId?: string; blockType?: DocumentBlockType; visualKind?: "text" | "heading" | "columns" | "table";
   columnWidths?: number[]; rowIndex?: number; coverageText?: string;
@@ -103,6 +109,7 @@ export interface PageState {
   pageId: string; pageIndex: number; templateId: string; widthMm: number; heightMm: number;
   backgroundId: string; backgroundAdjustments: BackgroundAdjustments;
   backgroundTransform: BackgroundTransform; lines: LineLayout[];
+  lineDetection?: HorizontalLineDetection;
   pageType?: PageType; pageTemplateId?: string | null; blockIds?: string[];
 }
 
@@ -156,4 +163,4 @@ export interface ProjectStateV1 {
 }
 
 export function lineX(line: LineLayout) { return line.autoX + line.manualOffsetX; }
-export function lineY(line: LineLayout) { return line.autoY + line.manualOffsetY; }
+export function lineY(line: LineLayout) { return line.autoY + (line.lineSnapOffset ?? 0) + line.manualOffsetY; }

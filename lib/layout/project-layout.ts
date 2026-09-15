@@ -13,3 +13,7 @@ export function layoutProjectPages(project: ProjectState, measurer: TextMeasurer
     previousPages: project.pages,
   }).pages;
 }
+
+export function applyFontToPages(pages: PageState[], fontId: string): PageState[] {
+  return pages.map((page) => ({ ...page, lines: page.lines.map((line) => ({ ...line, fontId })) }));
+}

@@ -13,7 +13,7 @@ from server.modules.document_parser import DocxParseError, parse_docx
 from server.resource_store import ResourceError, ResourceStore
 from server.session_store import InvalidSession, SessionStore
 
-VERSION = "3.1.1"
+VERSION = "4.0.0"
 FONT_LIMIT_BYTES = min(settings.max_upload_bytes, 32 * 1024 * 1024)
 BACKGROUND_LIMIT_BYTES = min(settings.max_upload_bytes, 25 * 1024 * 1024)
 sessions = SessionStore(settings.upload_dir, settings.temp_file_ttl_hours)

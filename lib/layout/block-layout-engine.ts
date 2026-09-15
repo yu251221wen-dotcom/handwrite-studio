@@ -5,6 +5,7 @@ import { breakTextByWidth } from "./line-breaker.ts";
 import type { TextMeasurer } from "./types.ts";
 import { DEFAULT_ADJUSTMENTS, DEFAULT_TRANSFORM } from "./paginator.ts";
 import { mapSourceCharacters } from "../handwriting/source-character-map.ts";
+import { applyLineSnapping, DEFAULT_LINE_DETECTION, normalizeLineDetection } from "../background/line-detection.ts";
 
 interface BlockLayoutInput {
   documentId: string; blocks: DocumentBlock[]; measurer: TextMeasurer;
@@ -115,6 +116,14 @@ function blockToUnit(block: DocumentBlock, input: BlockLayoutInput): BlockUnit {
   } else if (block.type === "signature" && !simple) {
     lines = structuredRows(block, [block.entries.map((entry) => entry.raw)], input, "columns");
     allowSplit = false;
+  } else if (block.type === "list") {
+    // Diagnostic/list items are intentionally denser than prose while normal
+    // paragraph line height and paragraph spacing remain unchanged.
+    lines = wrappedLines(block, block.sourceText, input, {
+      lineHeight: Math.max(input.settings.bodyFontSize + 8, input.settings.lineHeight - 5),
+    });
+    spacingBefore = Math.min(spacingBefore, 1);
+    spacingAfter = Math.min(spacingAfter, 4);
   } else {
     const firstIndent = block.type === "paragraph" ? (block.firstLineIndent || input.settings.firstLineIndent) : 0;
     lines = wrappedLines(block, block.sourceText, input, { firstIndent });
@@ -154,7 +163,8 @@ export function layoutDocumentBlocks(input: BlockLayoutInput): { pages: PageStat
       pageTemplateId: null, pageType: index === 0 ? "first" : "continuation",
       widthMm: 210, heightMm: 297, backgroundId: old?.backgroundId ?? input.backgroundId,
       backgroundAdjustments: old?.backgroundAdjustments ?? { ...DEFAULT_ADJUSTMENTS },
-      backgroundTransform: old?.backgroundTransform ?? { ...DEFAULT_TRANSFORM }, blockIds: [], lines: [],
+      backgroundTransform: old?.backgroundTransform ?? { ...DEFAULT_TRANSFORM },
+      lineDetection: normalizeLineDetection(old?.lineDetection ?? DEFAULT_LINE_DETECTION), blockIds: [], lines: [],
     };
     pages.push(page); y = top; return page;
   };
@@ -220,5 +230,6 @@ export function layoutDocumentBlocks(input: BlockLayoutInput): { pages: PageStat
     pages.push({ ...manual, pageIndex, pageId: manual.pageId || `page-${pageIndex + 1}`,
       lines: manual.lines.map((line) => ({ ...line, pageId: manual.pageId || `page-${pageIndex + 1}` })) });
   }
-  return { pages, lines: pages.flatMap((item) => item.lines) };
+  const snappedPages = pages.map((item) => applyLineSnapping(item, normalizeLineDetection(item.lineDetection)));
+  return { pages: snappedPages, lines: snappedPages.flatMap((item) => item.lines) };
 }

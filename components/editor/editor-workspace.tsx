@@ -15,16 +15,17 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { API_BASE_URL, apiFetch, apiJson, getSessionId } from "@/lib/api/client";
 import { DEMO_DOCUMENT_NAME, DEMO_INITIAL_FIELDS } from "@/lib/demo/medical-record-fixture";
-import { BACKGROUND_PRESETS } from "@/lib/handwriting/background-library";
-import { A4_PIXELS, renderCompositeCanvas, type RenderOptions } from "@/lib/handwriting/canvas-renderer";
-import { FONT_SLOTS, loadUploadedFont } from "@/lib/handwriting/font-library";
+import { BACKGROUND_PRESETS, renderBackground } from "@/lib/handwriting/background-library";
+import { A4_PIXELS, PAGE_HEIGHT, PAGE_WIDTH, renderCompositeCanvas, type RenderOptions } from "@/lib/handwriting/canvas-renderer";
+import { ensureFontsReady, FONT_SLOTS, loadUploadedFont } from "@/lib/handwriting/font-library";
+import { applyLineSnapping, DEFAULT_LINE_DETECTION, detectHorizontalLines, normalizeLineDetection, presetHorizontalLines } from "@/lib/background/line-detection";
 import { DEFAULT_RANDOMIZATION, PRESET_NATURALITY } from "@/lib/handwriting/randomization";
 import { deserializeProject, documentBlockFingerprint, documentFingerprint, serializeProject } from "@/lib/handwriting/serialization";
 import { nextSeed } from "@/lib/handwriting/seeded-random";
-import { DEFAULT_DOCUMENT_LAYOUT_SETTINGS, lineX, lineY, type BackgroundAsset, type DocumentBlock, type FieldMapping, type FontAsset, type HandwritingPreset, type LineLayout, type ProjectState, type RandomizationConfig } from "@/lib/handwriting/types";
+import { DEFAULT_DOCUMENT_LAYOUT_SETTINGS, lineX, lineY, type BackgroundAsset, type DocumentBlock, type FieldMapping, type FontAsset, type HandwritingPreset, type HorizontalLineDetection, type LineLayout, type ProjectState, type RandomizationConfig } from "@/lib/handwriting/types";
 import { commitGesture, commitHistory, createHistory, redoHistory, replacePresent, undoHistory } from "@/lib/history/history-store";
 import { validateDocumentCoverage } from "@/lib/layout/coverage";
-import { layoutProjectPages } from "@/lib/layout/project-layout";
+import { applyFontToPages, layoutProjectPages } from "@/lib/layout/project-layout";
 import { createApproximateTextMeasurer, createCanvasTextMeasurer } from "@/lib/layout/text-measure";
 import { addBlankPage, deletePageContent, duplicatePage, inspectPageDeletion, movePage } from "@/lib/pages/page-manager";
 
@@ -46,7 +47,7 @@ function makeProject(fields = DEMO_INITIAL_FIELDS, name = DEMO_DOCUMENT_NAME, ra
   const font = FONT_SLOTS.find((item) => item.id === fontId) ?? FONT_SLOTS[0];
   const demo = demoBlocks(fields); const documentId = documentFingerprint(demo.fields);
   const base: ProjectState = {
-    schemaVersion: 3, projectVersion: "3.1.1", id: previous?.id ?? "current",
+    schemaVersion: 3, projectVersion: "4.0.0", id: previous?.id ?? "current",
     document: { id: documentId, name, rawTexts, sourceCharacterCount: fields.reduce((sum, field) => sum + Array.from(field.value).length, 0) },
     layoutMode: "no-template", noTemplateMode: previous?.noTemplateMode ?? "preserve-structure",
     templateId: null, documentBlocks: demo.blocks,
@@ -88,6 +89,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   const [zoom, setZoom] = useState(0.82);
   const [parseStatus, setParseStatus] = useState("已载入示例内容");
   const [resourceError, setResourceError] = useState("");
+  const [detectingLines, setDetectingLines] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
   const [saveStatus, setSaveStatus] = useState("未保存");
   const [autosaveKey, setAutosaveKey] = useState("");
@@ -112,8 +114,13 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   useEffect(() => {
     Promise.all([apiJson<FontAsset[]>("/api/fonts"), apiJson<BackgroundAsset[]>("/api/backgrounds")])
       .then(async ([uploadedFonts, uploadedBackgrounds]) => {
-        for (const item of uploadedFonts) { try { await loadUploadedFont(item); } catch { /* resource stays visible */ } }
-        setFonts([...uploadedFonts, ...FONT_SLOTS]); setBackgrounds([...uploadedBackgrounds, ...BACKGROUND_PRESETS]); setResourceError("");
+        const loaded: FontAsset[] = []; const failed: FontAsset[] = [];
+        for (const item of uploadedFonts) {
+          try { await loadUploadedFont(item); loaded.push(item); }
+          catch (error) { failed.push({ ...item, enabled: false, loadError: error instanceof Error ? error.message : "字体加载失败" }); }
+        }
+        setFonts([...loaded, ...failed, ...FONT_SLOTS]); setBackgrounds([...uploadedBackgrounds, ...BACKGROUND_PRESETS]);
+        setResourceError(failed.length ? `${failed.length} 个字体未能真正加载，已禁用以避免系统字体回退` : "");
       }).catch((error) => setResourceError(error instanceof Error ? error.message : "字体与背景资源载入失败"));
   }, []);
 
@@ -132,12 +139,14 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
 
   const commit = (next: ProjectState) => { setSaveStatus("未保存"); setHistory((state) => commitHistory(state, { ...next, updatedAt: new Date().toISOString() })); };
   const change = (mutator: (state: ProjectState) => ProjectState) => commit(mutator(project));
-  const relayout = (fields: FieldMapping[] = project.fieldMappings, base = project, nextFontId = base.selectedFontId) => {
-    const nextFont = fonts.find((item) => item.id === nextFontId) ?? FONT_SLOTS[0];
+  const relayout = (fields: FieldMapping[] = project.fieldMappings, base = project, nextFontId = base.selectedFontId, fontOverride?: FontAsset) => {
+    const nextFont = fontOverride ?? fonts.find((item) => item.id === nextFontId) ?? FONT_SLOTS[0];
     const canvas = document.createElement("canvas"); const context = canvas.getContext("2d");
     const measurer = context ? createCanvasTextMeasurer(context) : createApproximateTextMeasurer();
     const next = { ...base, selectedFontId: nextFontId, fieldMappings: fields };
-    return { ...next, pages: layoutProjectPages(next, measurer, nextFont) };
+    let pages = layoutProjectPages(next, measurer, nextFont);
+    if (nextFontId !== base.selectedFontId) pages = applyFontToPages(pages, nextFontId);
+    return { ...next, pages };
   };
 
   useEffect(() => {
@@ -150,11 +159,11 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
     window.addEventListener("keydown", handler); return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const optionsFor = (pageId: string): RenderOptions => {
+  const optionsFor = (pageId: string, showLineGuides = false): RenderOptions => {
     const page = project.pages.find((item) => item.pageId === pageId) ?? project.pages[0];
     const pageBackground = backgrounds.find((item) => item.id === page.backgroundId) ?? backgrounds[0];
     return { page, pageCount: project.pages.length, font, fonts, background: pageBackground, handwriting: project.handwriting,
-      seed: project.seed, documentId: project.document.id, patientFields, fieldTextById, selectedLineId: selectedId };
+      seed: project.seed, documentId: project.document.id, patientFields, fieldTextById, selectedLineId: selectedId, showLineGuides };
   };
 
   const updateLine = (patch: Partial<LineLayout>) => {
@@ -171,9 +180,9 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
       setHistory((state) => commitGesture(state, before, state.present));
     }
   };
-  const selectFont = (id: string) => {
+  const selectFont = (id: string, fontOverride?: FontAsset) => {
     if (project.handwriting.fixed && id !== activeFontId && !window.confirm("当前笔迹已固定。更换字体需要解除固定并重新生成笔迹，是否继续？")) return;
-    const next = relayout(project.fieldMappings, { ...project, handwriting: { ...project.handwriting, fixed: false }, seed: project.handwriting.fixed ? nextSeed(project.seed) : project.seed }, id);
+    const next = relayout(project.fieldMappings, { ...project, handwriting: { ...project.handwriting, fixed: false }, seed: project.handwriting.fixed ? nextSeed(project.seed) : project.seed }, id, fontOverride);
     commit(next); setSelectedId(next.pages.flatMap((page) => page.lines).find((line) => line.fieldId === selected?.fieldId)?.id ?? next.pages[0]?.lines[0]?.id ?? "");
   };
   const setHandwriting = (patch: Partial<ProjectState["handwriting"]>) => change((state) => ({ ...state, handwriting: { ...state.handwriting, ...patch } }));
@@ -211,7 +220,10 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
     if (!coverage.valid) { setExportStatus(`内容校验未通过：缺失 ${coverage.missingCharacters} 字，请重新排版后导出。`); return; }
     setExportStatus("准备高分辨率页面…");
     try {
-      await document.fonts.ready;
+      const fontIds = [...new Set([project.selectedFontId, ...project.pages.flatMap((page) => page.lines.map((line) => line.fontId))])];
+      const exportFonts = fontIds.map((id) => fonts.find((item) => item.id === id)).filter((item): item is FontAsset => Boolean(item));
+      if (exportFonts.length !== fontIds.length) throw new Error("项目引用的字体资源不完整，已阻止静默回退导出");
+      await ensureFontsReady(exportFonts);
       const pixels = A4_PIXELS[project.exportSettings.dpi]; const pageBlobs: Blob[] = [];
       for (let index = 0; index < project.pages.length; index += 1) {
         setExportStatus(`正在绘制 ${index + 1} / ${project.pages.length} 页`);
@@ -239,6 +251,30 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   };
 
   const updateCurrentPage = (patch: Partial<typeof currentPage>) => change((state) => ({ ...state, pages: state.pages.map((page) => page.pageId === currentPage.pageId ? { ...page, ...patch } : page) }));
+  const updateLineDetection = (lineDetection: HorizontalLineDetection) => change((state) => ({ ...state, pages: state.pages.map((page) => page.pageId === currentPage.pageId ? applyLineSnapping(page, lineDetection) : page) }));
+  const selectBackground = (backgroundId: string) => change((state) => ({ ...state, pages: state.pages.map((page) => page.pageId === currentPage.pageId ? applyLineSnapping({ ...page, backgroundId }, { ...DEFAULT_LINE_DETECTION }) : page) }));
+  const detectCurrentBackgroundLines = async () => {
+    setDetectingLines(true); setResourceError("");
+    try {
+      const background = backgrounds.find((item) => item.id === currentPage.backgroundId) ?? backgrounds[0];
+      let result = presetHorizontalLines(background, PAGE_HEIGHT);
+      if (background.kind === "uploaded") {
+        if (Math.abs(currentPage.backgroundAdjustments.rotation) > 0.2) throw new Error("本阶段仅检测水平横线，请先将背景旋转调整为 0°");
+        const image = await loadExportBackground(background);
+        if (!image) throw new Error("背景图片尚未加载完成");
+        const canvas = document.createElement("canvas"); canvas.width = PAGE_WIDTH; canvas.height = PAGE_HEIGHT;
+        const context = canvas.getContext("2d", { willReadFrequently: true }); if (!context) throw new Error("浏览器无法读取背景像素");
+        renderBackground(context, background, currentPage.backgroundAdjustments, PAGE_WIDTH, PAGE_HEIGHT, `detect:${currentPage.pageId}`, image, currentPage.backgroundTransform);
+        result = detectHorizontalLines(context.getImageData(0, 0, PAGE_WIDTH, PAGE_HEIGHT));
+      }
+      const success = result.lineY.length >= 3 && result.confidence >= 0.35;
+      const next = normalizeLineDetection({ ...DEFAULT_LINE_DETECTION, enabled: success, snapEnabled: success,
+        showLines: success, source: background.kind === "preset" ? "preset" : "detected", ...result });
+      updateLineDetection(next);
+      if (!success) setResourceError("未可靠检测到水平横线；吸附未启用，可在横线适配中手动添加横线");
+    } catch (error) { setResourceError(error instanceof Error ? error.message : "横线检测失败"); }
+    finally { setDetectingLines(false); }
+  };
   const commitRelayout = (base: ProjectState) => { const next = relayout(base.fieldMappings, base); commit(next); setCurrentPageId(next.pages[0]?.pageId ?? "page-1"); setSelectedId(next.pages[0]?.lines[0]?.id ?? ""); };
   const setNoTemplateMode = (noTemplateMode: ProjectState["noTemplateMode"]) => commitRelayout({ ...project, noTemplateMode });
   const setLayoutSettings = (documentLayoutSettings: ProjectState["documentLayoutSettings"]) => commitRelayout({ ...project, documentLayoutSettings });
@@ -259,7 +295,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   };
   return <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f6f8] text-slate-900">
     <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white/95 px-2 backdrop-blur sm:px-7">
-      <div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#153f49] text-white"><FileText className="size-4.5" /></div><div className="hidden min-w-0 sm:block"><div className="flex items-center gap-2"><h1 className="text-[15px] font-semibold">墨迹排版台 V3.1.1</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost") ? "本地隐私模式" : "在线临时会话"}</span></div><p className="max-w-96 truncate text-xs text-slate-400">{project.document.name} · {project.pages.length} 页 · {project.noTemplateMode === "preserve-structure" ? "保留结构" : "简化正文"} · Seed {project.seed} · {saveStatus}</p></div></div>
+      <div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#153f49] text-white"><FileText className="size-4.5" /></div><div className="hidden min-w-0 sm:block"><div className="flex items-center gap-2"><h1 className="text-[15px] font-semibold">墨迹排版台 V4.0</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost") ? "本地隐私模式" : "在线临时会话"}</span></div><p className="max-w-96 truncate text-xs text-slate-400">{project.document.name} · {project.pages.length} 页 · {project.noTemplateMode === "preserve-structure" ? "保留结构" : "简化正文"} · Seed {project.seed} · {saveStatus}</p></div></div>
       <div className="flex items-center gap-1.5"><label aria-label="导入 DOCX" className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 xl:hidden"><Upload className="size-4" /><input className="sr-only" type="file" accept=".docx" onChange={uploadDocx} /></label><select aria-label="导出格式" className="h-8 rounded-md border border-slate-200 bg-white px-1 text-[11px] xl:hidden" value={project.exportSettings.format} onChange={(event) => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, format: event.target.value as "png" | "jpg" | "pdf" } }))}><option value="png">PNG</option><option value="jpg">JPG</option><option value="pdf">PDF</option></select><Button className="xl:hidden" variant="ghost" size="icon-sm" disabled={project.handwriting.fixed} onClick={() => change((state) => ({ ...state, seed: nextSeed(state.seed) }))} aria-label="换一种笔迹"><RefreshCw /></Button><Button variant="ghost" size="icon-sm" disabled={!history.past.length} onClick={() => setHistory(undoHistory)} aria-label="撤销"><Undo2 /></Button><Button variant="ghost" size="icon-sm" disabled={!history.future.length} onClick={() => setHistory(redoHistory)} aria-label="重做"><Redo2 /></Button><Button variant="outline" className="hidden rounded-lg md:inline-flex" onClick={saveProject}><Save />保存项目</Button><Button className="rounded-lg bg-[#d96945] text-white hover:bg-[#bf5737]" onClick={exportDocument}><Download />导出 {project.exportSettings.format.toUpperCase()}</Button></div>
     </header>
 
@@ -278,16 +314,16 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
           <div className="rounded-xl border border-[#cce4e2] bg-[#eff9f8] p-3 text-xs leading-5 text-[#356b6c]"><div className="mb-1 flex items-center gap-2 font-semibold"><Sparkles className="size-3.5" />Block 完整性检查</div><div className="grid grid-cols-2 gap-x-3"><span>Raw {coverage.rawCharacters}</span><span>Recognized {coverage.recognizedCharacters}</span><span>Laid out {coverage.laidOutCharacterCount}</span><span>Ignored {coverage.explicitlyIgnoredCharacters}</span></div><strong className={coverage.valid ? "text-emerald-700" : "text-rose-700"}>Missing {coverage.missingCharacters}</strong></div>
           <PageManager pages={project.pages} currentPageId={currentPage.pageId} onSelect={setCurrentPageId} onAdd={addPage} onDuplicate={copyPage} onMove={reorderPage} onDelete={deletePage} />
         </TabsContent>
-        <TabsContent value="font" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<FontManager fonts={fonts} selectedId={activeFontId} onSelect={selectFont} onUploaded={(asset) => setFonts((items) => [asset, ...items.filter((item) => item.id !== asset.id)])} /></TabsContent>
-        <TabsContent value="background" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<BackgroundManager backgrounds={backgrounds} selectedId={currentPage.backgroundId} adjustments={currentPage.backgroundAdjustments} transform={currentPage.backgroundTransform} onSelect={(backgroundId) => updateCurrentPage({ backgroundId })} onAdjust={(backgroundAdjustments) => updateCurrentPage({ backgroundAdjustments })} onTransform={(backgroundTransform) => updateCurrentPage({ backgroundTransform })} onApplyToAll={() => change((state) => ({ ...state, pages: state.pages.map((page) => ({ ...page, backgroundId: currentPage.backgroundId, backgroundAdjustments: { ...currentPage.backgroundAdjustments }, backgroundTransform: { ...currentPage.backgroundTransform } })) }))} onUploaded={(asset) => setBackgrounds((items) => [asset, ...items.filter((item) => item.id !== asset.id)])} /></TabsContent>
+        <TabsContent value="font" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<FontManager fonts={fonts} selectedId={activeFontId} onSelect={(id) => selectFont(id)} onUploaded={(asset) => { setFonts((items) => [asset, ...items.filter((item) => item.id !== asset.id)]); selectFont(asset.id, asset); setResourceError(""); }} /></TabsContent>
+        <TabsContent value="background" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<BackgroundManager backgrounds={backgrounds} selectedId={currentPage.backgroundId} adjustments={currentPage.backgroundAdjustments} transform={currentPage.backgroundTransform} lineDetection={normalizeLineDetection(currentPage.lineDetection)} detecting={detectingLines} onSelect={selectBackground} onAdjust={(backgroundAdjustments) => updateCurrentPage({ backgroundAdjustments })} onTransform={(backgroundTransform) => updateCurrentPage({ backgroundTransform })} onLineDetection={updateLineDetection} onDetectLines={() => void detectCurrentBackgroundLines()} onApplySuggestedLayout={(bodyFontSize, lineHeight) => setLayoutSettings({ ...project.documentLayoutSettings, bodyFontSize, lineHeight })} onApplyToAll={() => change((state) => ({ ...state, pages: state.pages.map((page) => applyLineSnapping({ ...page, backgroundId: currentPage.backgroundId, backgroundAdjustments: { ...currentPage.backgroundAdjustments }, backgroundTransform: { ...currentPage.backgroundTransform } }, normalizeLineDetection(currentPage.lineDetection))) }))} onUploaded={(asset) => { setBackgrounds((items) => [asset, ...items.filter((item) => item.id !== asset.id)]); selectBackground(asset.id); }} /></TabsContent>
       </Tabs></aside>
 
-      <section className="flex min-h-0 flex-col overflow-hidden bg-[#e7ecef]"><div className="sticky top-0 z-10 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white/80 px-5 text-xs text-slate-500"><span className="flex items-center gap-2"><Grid3X3 className="size-4" />多页 Canvas · 当前第 {currentPage.pageIndex + 1} 页</span><span className="flex items-center gap-2"><Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.max(0.5, value - 0.08))}><Minus /></Button>{Math.round(zoom * 100)}%<Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.min(1.2, value + 0.08))}><Plus /></Button></span></div><div className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center gap-12 overflow-auto p-8 sm:p-12">{project.pages.map((page) => <div key={page.pageId} className="space-y-3"><div className="text-center text-xs text-slate-500">第 {page.pageIndex + 1} 页 · {page.pageType ?? "continuation"}</div><HandwritingCanvas options={optionsFor(page.pageId)} zoom={zoom} active={page.pageId === currentPage.pageId} onActivate={() => setCurrentPageId(page.pageId)} onSelectLine={selectLine} onChangeLines={(lines, phase) => onDragLines(page.pageId, lines, phase)} /></div>)}</div></section>
+      <section className="flex min-h-0 flex-col overflow-hidden bg-[#e7ecef]"><div className="sticky top-0 z-10 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white/80 px-5 text-xs text-slate-500"><span className="flex items-center gap-2"><Grid3X3 className="size-4" />多页 Canvas · 当前第 {currentPage.pageIndex + 1} 页</span><span className="flex items-center gap-2"><Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.max(0.5, value - 0.08))}><Minus /></Button>{Math.round(zoom * 100)}%<Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.min(1.2, value + 0.08))}><Plus /></Button></span></div><div className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center gap-12 overflow-auto p-8 sm:p-12">{project.pages.map((page) => <div key={page.pageId} className="space-y-3"><div className="text-center text-xs text-slate-500">第 {page.pageIndex + 1} 页 · {page.pageType ?? "continuation"}</div><HandwritingCanvas options={optionsFor(page.pageId, true)} zoom={zoom} active={page.pageId === currentPage.pageId} onActivate={() => setCurrentPageId(page.pageId)} onSelectLine={selectLine} onChangeLines={(lines, phase) => onDragLines(page.pageId, lines, phase)} onRenderError={setResourceError} /></div>)}</div></section>
 
       <aside className="min-h-0 overflow-y-auto border-l border-slate-200 bg-white px-5 py-5 max-xl:hidden">{selected ? <>
         <div className="mb-5 flex items-center justify-between"><div><h2 className="text-sm font-semibold">当前行参数</h2><p className="mt-0.5 text-xs text-slate-400">自动坐标 + 手动偏移 · 字符状态稳定</p></div><Switch checked={selected.locked} onCheckedChange={(locked) => updateLine({ locked })} aria-label="锁定当前行" /></div>
         <button onClick={() => setActiveTab("font")} className="mb-5 flex h-10 w-full items-center justify-between rounded-lg border border-slate-200 px-3 text-sm text-slate-700"><span>字体 · {font.name}</span><ChevronDown className="size-4 text-slate-400" /></button>
-        <div className="space-y-4"><RangeRow label="X（最终）" value={lineX(selected)} display={`${Math.round(lineX(selected))} px`} min={0} max={560} onChange={(x) => updateLine({ manualOffsetX: x - selected.autoX })} /><RangeRow label="Y（最终）" value={lineY(selected)} display={`${Math.round(lineY(selected))} px`} min={100} max={780} onChange={(y) => updateLine({ manualOffsetY: y - selected.autoY })} /><RangeRow label="字号" value={selected.fontSize} display={`${selected.fontSize} px`} min={12} max={28} onChange={(fontSize) => updateLine({ fontSize })} /><RangeRow label="字距" value={selected.letterSpacing} display={`${selected.letterSpacing.toFixed(1)} px`} min={-1} max={5} step={0.1} onChange={(letterSpacing) => updateLine({ letterSpacing })} /><RangeRow label="旋转" value={selected.rotation} display={`${selected.rotation.toFixed(1)}°`} min={-4} max={4} step={0.1} onChange={(rotation) => updateLine({ rotation })} /><RangeRow label="行距" value={selected.lineHeight} display={`${selected.lineHeight} px`} min={28} max={72} onChange={(lineHeight) => updateLine({ lineHeight })} /></div>
+        <div className="space-y-4"><RangeRow label="X（最终）" value={lineX(selected)} display={`${Math.round(lineX(selected))} px`} min={0} max={560} onChange={(x) => updateLine({ manualOffsetX: x - selected.autoX })} /><RangeRow label="Y（最终）" value={lineY(selected)} display={`${Math.round(lineY(selected))} px`} min={100} max={780} onChange={(y) => updateLine({ manualOffsetY: y - selected.autoY - (selected.lineSnapOffset ?? 0) })} /><RangeRow label="字号" value={selected.fontSize} display={`${selected.fontSize} px`} min={12} max={28} onChange={(fontSize) => updateLine({ fontSize })} /><RangeRow label="字距" value={selected.letterSpacing} display={`${selected.letterSpacing.toFixed(1)} px`} min={-1} max={5} step={0.1} onChange={(letterSpacing) => updateLine({ letterSpacing })} /><RangeRow label="旋转" value={selected.rotation} display={`${selected.rotation.toFixed(1)}°`} min={-4} max={4} step={0.1} onChange={(rotation) => updateLine({ rotation })} /><RangeRow label="行距" value={selected.lineHeight} display={`${selected.lineHeight} px`} min={28} max={72} onChange={(lineHeight) => updateLine({ lineHeight })} /></div>
         <div className="mt-6 border-t border-slate-100 pt-5"><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-semibold">手写自然度</h3><span className="text-xs text-slate-400">{project.handwriting.naturality}</span></div><div className="mb-4 grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1">{(["neat", "natural", "messy"] as const).map((preset) => <button disabled={project.handwriting.fixed} key={preset} onClick={() => choosePreset(preset)} className={`rounded-md px-2 py-1.5 text-xs disabled:opacity-50 ${project.handwriting.preset === preset ? "bg-white font-medium shadow-sm" : "text-slate-500"}`}>{preset === "neat" ? "整洁" : preset === "natural" ? "自然" : "凌乱"}</button>)}</div><Slider disabled={project.handwriting.fixed} value={[project.handwriting.naturality]} min={0} max={100} onValueChange={(value) => setHandwriting({ naturality: Number(value[0]) })} /></div>
         <div className="mt-5 grid grid-cols-2 gap-2"><Button disabled={project.handwriting.fixed} onClick={() => change((state) => ({ ...state, seed: nextSeed(state.seed) }))}><RefreshCw />换一种笔迹</Button><Button variant="outline" onClick={() => setHandwriting({ fixed: !project.handwriting.fixed })}>{project.handwriting.fixed ? <Lock /> : <Save />}{project.handwriting.fixed ? "已固定" : "固定笔迹"}</Button></div>
         <Collapsible open={advanced} onOpenChange={setAdvanced} className="mt-5 border-t border-slate-100 pt-4"><CollapsibleTrigger className="flex w-full items-center justify-between py-2 text-sm font-semibold">自然度高级设置 <ChevronDown className={`size-4 transition ${advanced ? "rotate-180" : ""}`} /></CollapsibleTrigger><CollapsibleContent className="space-y-4 pt-3">{([

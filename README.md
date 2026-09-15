@@ -1,6 +1,6 @@
-# 墨迹排版台 V3.1.1
+# 墨迹排版台 V4.0
 
-墨迹排版台是本地优先、可选在线临时会话的通用 DOCX 手写排版器。V3.1.1 延续无模板 DocumentBlock 唯一正式工作流，并完成公网字体/背景资源链路、长段落分页利用率和三栏独立滚动收尾；原有多页 Canvas、自然手写、逐行编辑、Undo/Redo 与高 DPI 导出均保留。
+墨迹排版台是本地优先、可选在线临时会话的通用 DOCX 手写排版器。V4.0 延续无模板 DocumentBlock 唯一正式工作流，完成上传字体的 Canvas 真实加载校验，并增加水平横线检测、可视化和文字基线吸附；原有多页 Canvas、自然手写、逐行编辑、Undo/Redo 与高 DPI 导出均保留。
 
 ## Development Context
 
@@ -15,7 +15,16 @@ Before modifying this project, read:
 
 Do not duplicate long-term requirements in each development prompt.
 
-## V3.1.1 功能
+## V4.0 功能
+
+- 上传 TTF/OTF 经过 `FontFace.load()`、`document.fonts.load()`、`document.fonts.ready` 和验收 Canvas 像素校验；失败时明确禁用，不允许静默回退。
+- 页面级横线适配保存检测开关、横线 Y 坐标、平均行距、置信度、吸附开关、整体 Y 偏移和辅助线显示状态。
+- 内置横线纸直接使用精确坐标；用户上传水平横线纸使用纯前端行投影检测，不引入 OpenCV 或新的部署依赖。
+- 基线位置使用 `autoY + lineSnapOffset + manualOffsetY`，换 Seed 不改变吸附位置，拖动行仍只修改手动偏移。
+- 支持自动检测、开启/关闭吸附、行距/Y 偏移校准、添加/删除横线、重置和字号/行距建议；检测辅助线不会进入 PNG/PDF。
+- List/诊断 Block 使用更紧凑的专用行距，普通正文排版不变。
+
+## V3.1 基础能力
 
 - 排版方式：统一使用 `no-template`；默认“保留原文结构”，另有“简化正文”。
 - DocumentBlock：Heading、Paragraph、KeyValue、List、Table、Prescription、Signature，均保存原文顺序和来源区间。
@@ -67,7 +76,7 @@ py -3.12 -m venv .venv
 ```
 
 - 编辑器：`http://localhost:5173/`
-- V3 Showcase：`http://localhost:5173/showcase`
+- V4 Showcase：`http://localhost:5173/showcase`
 - FastAPI health：`http://127.0.0.1:8000/health`
 
 ## 测试
@@ -90,7 +99,7 @@ pnpm build
 
 ## 部署
 
-前端公网版本使用 Cloudflare Pages 的 Next.js 静态导出，FastAPI 使用 `Dockerfile.api` 部署到 Railway。本地/Vinext 构建保持不变；Pages 使用独立的 `pnpm build:pages`，产物目录为 `out`。生产环境必须设置真实 `NEXT_PUBLIC_API_BASE_URL`、HTTPS `PUBLIC_API_BASE_URL` 与精确 `ALLOWED_ORIGINS`，不得使用通配 CORS。详见 [部署说明](docs/DEPLOYMENT.md) 和 [V3 架构](docs/V3-ARCHITECTURE.md)。
+前端公网版本使用 Cloudflare Pages 的 Next.js 静态导出，FastAPI 使用 `Dockerfile.api` 部署到 Railway。本地/Vinext 构建保持不变；Pages 使用独立的 `pnpm build:pages`，产物目录为 `out`。生产环境必须设置真实 `NEXT_PUBLIC_API_BASE_URL`、HTTPS `PUBLIC_API_BASE_URL` 与精确 `ALLOWED_ORIGINS`，不得使用通配 CORS。详见 [部署说明](docs/DEPLOYMENT.md)、[V3 文档排版架构](docs/V3-ARCHITECTURE.md) 和 [V4 横线适配架构](docs/V4-ARCHITECTURE.md)。
 
 ## 本轮明确暂缓
 
@@ -100,4 +109,4 @@ pnpm build
 
 当前限制：自动排版后手工改页次可保存，但再次全局重排会重建自动页顺序；跨软件关闭的草稿恢复受浏览器 Session 生命周期限制，请使用保存 JSON；字体依赖本机已安装字体或用户上传，跨设备应上传同一字体以保持视觉一致。高 DPI 导出按页串行绘制，耗时与页数相关。
 
-OCR、PaddleOCR、扫描 PDF OCR、AI/LLM 字段匹配、自动横线检测、Hough Transform、自动透视校正、四角透视拖拽、SVG Path 笔画扰动、自动涂改、圈画与 AI 生成笔迹仍未实现。
+OCR、PaddleOCR、扫描 PDF OCR、AI/LLM 字段匹配、Hough Transform、自动透视校正、四角透视拖拽、弯曲纸张、SVG Path 笔画扰动、自动涂改、圈画与 AI 生成笔迹仍未实现。V4.0 横线检测只支持无透视、基本水平的横线纸。

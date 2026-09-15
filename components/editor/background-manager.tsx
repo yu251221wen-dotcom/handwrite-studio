@@ -1,12 +1,14 @@
 "use client";
 
 import { type ChangeEvent, useRef, useState } from "react";
-import { Check, Upload } from "lucide-react";
+import { Check, Plus, RotateCcw, ScanLine, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api/client";
 import { Slider } from "@/components/ui/slider";
-import type { BackgroundAdjustments, BackgroundAsset, BackgroundTransform } from "@/lib/handwriting/types";
+import { Switch } from "@/components/ui/switch";
+import { DEFAULT_LINE_DETECTION, respaceHorizontalLines } from "@/lib/background/line-detection";
+import type { BackgroundAdjustments, BackgroundAsset, BackgroundTransform, HorizontalLineDetection } from "@/lib/handwriting/types";
 
 function thumbStyle(asset: BackgroundAsset) {
   const spacing = asset.spacing ?? 12;
@@ -21,9 +23,9 @@ function Adjustment({ label, value, min, max, unit, onChange }: { label: string;
   return <div className="space-y-2"><div className="flex justify-between text-xs text-slate-500"><span>{label}</span><span>{value}{unit}</span></div><Slider value={[value]} min={min} max={max} onValueChange={(next) => onChange(Number(next[0]))} /></div>;
 }
 
-export function BackgroundManager({ backgrounds, selectedId, adjustments, transform, onSelect, onAdjust, onTransform, onApplyToAll, onUploaded }: { backgrounds: BackgroundAsset[]; selectedId: string; adjustments: BackgroundAdjustments; transform: BackgroundTransform; onSelect: (id: string) => void; onAdjust: (value: BackgroundAdjustments) => void; onTransform: (value: BackgroundTransform) => void; onApplyToAll: () => void; onUploaded: (asset: BackgroundAsset) => void }) {
+export function BackgroundManager({ backgrounds, selectedId, adjustments, transform, lineDetection, detecting, onSelect, onAdjust, onTransform, onLineDetection, onDetectLines, onApplySuggestedLayout, onApplyToAll, onUploaded }: { backgrounds: BackgroundAsset[]; selectedId: string; adjustments: BackgroundAdjustments; transform: BackgroundTransform; lineDetection: HorizontalLineDetection; detecting: boolean; onSelect: (id: string) => void; onAdjust: (value: BackgroundAdjustments) => void; onTransform: (value: BackgroundTransform) => void; onLineDetection: (value: HorizontalLineDetection) => void; onDetectLines: () => void; onApplySuggestedLayout: (fontSize: number, lineHeight: number) => void; onApplyToAll: () => void; onUploaded: (asset: BackgroundAsset) => void }) {
   const input = useRef<HTMLInputElement>(null);
-  const [status, setStatus] = useState("30 种程序生成预设；图片保存在本机");
+  const [status, setStatus] = useState(`${backgrounds.filter((item) => item.kind === "preset").length} 种程序生成预设；图片保存在本机`);
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; if (!file) return;
     setStatus("正在载入背景…"); const body = new FormData(); body.append("file", file);
@@ -36,6 +38,14 @@ export function BackgroundManager({ backgrounds, selectedId, adjustments, transf
     event.target.value = "";
   };
   const set = (key: keyof BackgroundAdjustments, value: number) => onAdjust({ ...adjustments, [key]: value });
+  const suggestedFontSize = Math.max(12, Math.min(28, Math.round(lineDetection.averageSpacing * 0.43)));
+  const suggestedLineHeight = Math.max(28, Math.min(72, Math.round(lineDetection.averageSpacing)));
+  const updateDetection = (patch: Partial<HorizontalLineDetection>) => onLineDetection({ ...lineDetection, ...patch });
+  const addLine = () => {
+    const last = lineDetection.lineY.at(-1) ?? 60;
+    const next = last + lineDetection.averageSpacing < 838 ? last + lineDetection.averageSpacing : Math.max(8, (lineDetection.lineY[0] ?? 60) - lineDetection.averageSpacing);
+    updateDetection({ enabled: true, source: "manual", lineY: [...lineDetection.lineY, next].sort((left, right) => left - right) });
+  };
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between"><div><h2 className="text-sm font-semibold">纸张背景</h2><p className="mt-1 text-xs leading-5 text-slate-400">{status}</p></div><Button size="sm" onClick={() => input.current?.click()}><Upload />上传</Button></div>
@@ -54,6 +64,17 @@ export function BackgroundManager({ backgrounds, selectedId, adjustments, transf
         <Adjustment label="模糊" value={adjustments.blur} min={0} max={3} unit=" px" onChange={(value) => set("blur", value)} />
         <Adjustment label="噪点" value={adjustments.noise} min={0} max={100} unit="%" onChange={(value) => set("noise", value)} />
         <Adjustment label="旋转" value={adjustments.rotation} min={-4} max={4} unit="°" onChange={(value) => set("rotation", value)} />
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="flex items-center justify-between"><div><div className="flex items-center gap-2 text-sm font-semibold"><ScanLine className="size-4 text-[#287e86]" />横线适配</div><p className="mt-1 text-[11px] text-slate-400">{lineDetection.lineY.length ? `${lineDetection.lineY.length} 条 · 置信度 ${Math.round(lineDetection.confidence * 100)}%` : "尚未检测横线"}</p></div><Button size="sm" disabled={detecting} onClick={onDetectLines}>{detecting ? "检测中…" : "自动检测"}</Button></div>
+          <div className="flex items-center justify-between text-xs text-slate-600"><span>启用横线适配</span><Switch checked={lineDetection.enabled} onCheckedChange={(enabled) => updateDetection({ enabled, snapEnabled: enabled && lineDetection.snapEnabled })} /></div>
+          <div className="flex items-center justify-between text-xs text-slate-600"><span>文字基线吸附</span><Switch disabled={!lineDetection.enabled || !lineDetection.lineY.length} checked={lineDetection.snapEnabled} onCheckedChange={(snapEnabled) => updateDetection({ snapEnabled })} /></div>
+          <div className="flex items-center justify-between text-xs text-slate-600"><span>显示检测线</span><Switch disabled={!lineDetection.enabled || !lineDetection.lineY.length} checked={lineDetection.showLines} onCheckedChange={(showLines) => updateDetection({ showLines })} /></div>
+          <Adjustment label="检测行距" value={Math.round(lineDetection.averageSpacing)} min={18} max={90} unit=" px" onChange={(averageSpacing) => updateDetection({ averageSpacing, source: "manual", lineY: respaceHorizontalLines(lineDetection.lineY, averageSpacing) })} />
+          <Adjustment label="整体 Y 偏移" value={lineDetection.offsetY} min={-20} max={20} unit=" px" onChange={(offsetY) => updateDetection({ offsetY, source: "manual" })} />
+          {lineDetection.lineY.length > 0 && <div className="flex items-center justify-between rounded-lg bg-white px-2 py-2 text-[11px] text-slate-500"><span>建议：字号 {suggestedFontSize} · 行距 {suggestedLineHeight}</span><button className="font-medium text-[#287e86]" onClick={() => onApplySuggestedLayout(suggestedFontSize, suggestedLineHeight)}>应用建议</button></div>}
+          {lineDetection.lineY.length > 0 && <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg bg-white p-2">{lineDetection.lineY.map((line, index) => <div key={`${line}-${index}`} className="flex items-center justify-between text-[11px] text-slate-500"><span>横线 {index + 1} · Y {Math.round(line)}</span><button aria-label={`删除横线 ${index + 1}`} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" onClick={() => updateDetection({ source: "manual", lineY: lineDetection.lineY.filter((_, itemIndex) => itemIndex !== index) })}><Trash2 className="size-3" /></button></div>)}</div>}
+          <div className="grid grid-cols-2 gap-2"><Button variant="outline" size="sm" onClick={addLine}><Plus />添加横线</Button><Button variant="outline" size="sm" onClick={() => onLineDetection({ ...DEFAULT_LINE_DETECTION })}><RotateCcw />重置</Button></div>
+        </div>
         <Button variant="outline" className="w-full" onClick={onApplyToAll}>应用到全部页面</Button>
       </div>
     </section>

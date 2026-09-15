@@ -22,7 +22,7 @@ class ApiSecurityTests(unittest.TestCase):
     def test_health_is_safe_and_versioned(self) -> None:
         result = health()
         self.assertEqual(result["status"], "ok")
-        self.assertTrue(result["version"].startswith("3."))
+        self.assertTrue(result["version"].startswith("4."))
         self.assertNotIn("path", result)
 
     def test_sessions_are_isolated(self) -> None:

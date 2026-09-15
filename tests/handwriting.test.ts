@@ -227,7 +227,8 @@ test("A4 export dimensions are exact", () => {
 });
 
 test("asset positions are distinct and 5000 states stay interactive", () => {
-  assert.equal(new Set(FONT_SLOTS.map((entry) => entry.id)).size, 30); assert.equal(new Set(BACKGROUND_PRESETS.map((entry) => entry.id)).size, 30);
+  assert.equal(new Set(FONT_SLOTS.map((entry) => entry.id)).size, 30);
+  assert.ok(BACKGROUND_PRESETS.length >= 30); assert.equal(new Set(BACKGROUND_PRESETS.map((entry) => entry.id)).size, BACKGROUND_PRESETS.length);
   const text = "患者舌淡苔薄脉弦治疗以疏肝理气健脾和胃为法。".repeat(250).slice(0, 5000); const started = performance.now();
   assert.equal(generateCharacterStates(text, nextSeed("1001"), DEFAULT_RANDOMIZATION, 84).length, 5000);
   assert.ok(performance.now() - started < 500);
