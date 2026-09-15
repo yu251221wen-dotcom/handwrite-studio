@@ -15,7 +15,7 @@
 - V4 实现提交：`e6926cdf07dd0116e68ee6d9c34243de65596448`
 - 横线吸附防重叠修复：`41ebf6e55ecb345c7c3b6534c51a3addff629405`
 - V4 公网背景与单调吸附修复：`e83bb92`
-- V4.1 背景感知纸线槽位布局：本轮待提交
+- V4.1 背景感知纸线槽位布局：`1282c2f`
 
 ---
 
@@ -113,7 +113,7 @@
 
 ## 当前最高优先级
 
-当前阶段：V4.1 背景感知布局本地实现与验收完成，待推送并复核公网自动部署
+当前阶段：V4.1 背景感知布局已完成并部署公网
 
 1. Cloudflare Pages 正式前端保持可用
 2. 保持 Session isolation、精确 CORS 和 `/health`
@@ -137,7 +137,7 @@ V4.1 完成后，下一阶段可进入 V5 纸张倾斜和四角透视校准，�
 - ESLint：0 error
 - Build：Vinext production build 通过
 - Cloudflare Pages 静态导出：通过；4 个正式路由均生成到 `out/`
-- FastAPI health：本地通过，`status=ok`、`version=4.1.0`；公网待本轮部署后复核
+- FastAPI health：本地与公网均通过，`status=ok`、`version=4.1.0`
 - Golden Test：Raw 3657 / Laid out 3657 / Missing 0；实际 Canvas `fillText` 覆盖率通过
 - 公网 DOCX：合成长文档 Raw 3097 / Laid out 3097 / Missing 0，DocumentBlock 5，自动排版 7 页
 - 横线检测：标准/噪声/粗线双边缘合并单测通过；纯白背景不会误启用吸附
@@ -153,13 +153,13 @@ V4.1 完成后，下一阶段可进入 V5 纸张倾斜和四角透视校准，�
 - 公网 Session isolation：新浏览器会话未读取到另一会话上传的字体、背景或长文档状态
 - 公网 CORS：正式前端 Origin 允许，预检 200，`X-Session-ID` 已允许
 - 公网资源：TTF 与合成 PNG 上传成功；返回 URL 为直接 HTTPS；文件响应 200 且 CORS 精确匹配正式前端
-- 公网 PNG：从正式 Pages UI 导出，实测 2480 × 3508 px（A4 300 DPI），不含红色检测辅助线
-- 公网 PDF：从正式 Pages UI 独立导出，程序读取为 1 页；300 DPI 回渲尺寸 2481 × 3509，与 PNG 对齐后平均像素差 0.652 / 255，无浏览器页眉、默认边距或额外页面；长文档链路另已实测导出 7 页
+- 公网 PNG：从 V4.1 正式 Pages UI 导出，实测 2480 × 3508 px（A4 300 DPI）；淡蓝横线背景与文字槽位均存在，不含红色检测辅助线
+- 公网 PDF：从 V4.1 正式 Pages UI 独立导出，程序读取为 1 页；300 DPI 回渲尺寸 2481 × 3509，与 PNG 对齐后平均像素差 0.531 / 255，无浏览器页眉、默认边距或额外页面；长文档链路另由 Golden 覆盖 10 页
 - UI：桌面三栏结构保持；字体 30 资源位、背景 31 个不同预设；控制台 0 error/warning；移动端沿用 V3.1 已验收的非破版响应式结构
 - Cloudflare Pages：4 个正式路由 `/`、`/font-library/`、`/background-library/`、`/showcase/` 均为 HTTP 200
-- Clean-room：V3.0 最近一次通过；V4.0 尚未重新打包和执行 clean-room
+- Clean-room：V3.0 最近一次通过；V4.1 尚未重新打包和执行 clean-room
 
-V4.1 完整源码测试与本地验收已通过；公网验收在本轮推送后完成。正式 ZIP 与 clean-room 仍需在单独的源码交付轮次更新。
+V4.1 完整源码测试、本地验收和公网验收均已通过。正式 ZIP 与 clean-room 仍需在单独的源码交付轮次更新。
 
 ---
 
@@ -177,7 +177,7 @@ V4.1 完整源码测试与本地验收已通过；公网验收在本轮推送后
 - Frontend：V4.1 运行于 `http://localhost:5173/`
 - Showcase：V4.1 可由 `http://localhost:5173/showcase` 验收
 - Backend：V4.1 运行于 `http://127.0.0.1:8000`
-- Health：本地验证 `status=ok`、`version=4.1.0`
+- Health：本地与公网均验证 `status=ok`、`version=4.1.0`
 
 ---
 
@@ -185,16 +185,16 @@ V4.1 完整源码测试与本地验收已通过；公网验收在本轮推送后
 
 - Frontend：`https://handwrite-studio.pages.dev/`
 - API：`https://handwrite-studio-api-production.up.railway.app`
-- Health：`https://handwrite-studio-api-production.up.railway.app/health`（HTTP 200，`status=ok`、`version=4.0.0`、`environment=production`）
+- Health：`https://handwrite-studio-api-production.up.railway.app/health`（HTTP 200，`status=ok`、`version=4.1.0`、`environment=production`）
 - Showcase：`https://handwrite-studio.pages.dev/showcase/`
 
 ---
 
 ## 当前部署状态
 
-Railway FastAPI production 后端已部署 V4.0：服务 `handwrite-studio-api`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。`ALLOWED_ORIGINS` 精确设置为 `https://handwrite-studio.pages.dev`。Render 因绑卡要求停用。
+Railway FastAPI production 后端已部署 V4.1：服务 `handwrite-studio-api`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。`ALLOWED_ORIGINS` 精确设置为 `https://handwrite-studio.pages.dev`。Render 因绑卡要求停用。
 
-Cloudflare Pages production 前端已部署 V4.0：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。当前正式运行时代码基线为提交 `e83bb92`，包含公网背景资源恢复与横线单调一一匹配修复。
+Cloudflare Pages production 前端已部署 V4.1：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。当前正式运行时代码基线为提交 `1282c2f`，包含背景感知纸线槽位布局及手动可写范围校准。
 
 ---
 
@@ -215,7 +215,7 @@ Cloudflare Pages production 前端已部署 V4.0：项目 `handwrite-studio`，�
 
 ## 当前交付文件
 
-- ZIP：`../outputs/handwrite-studio-v3-final-cleanroom-20260913.zip`（旧 V3.0，不含 V4.0 修改）
+- ZIP：`../outputs/handwrite-studio-v3-final-cleanroom-20260913.zip`（旧 V3.0，不含 V4.0/V4.1 修改）
 - README：`README.md`
 - Architecture：`docs/ARCHITECTURE.md`、`docs/V3-ARCHITECTURE.md`、`docs/V4-ARCHITECTURE.md`
 - Deployment：`docs/DEPLOYMENT.md`
@@ -224,6 +224,8 @@ Cloudflare Pages production 前端已部署 V4.0：项目 `handwrite-studio`，�
 - Golden PNG：`../outputs/v3-fixed-golden-300dpi-page1.png`
 - V4 修复公网 PDF：`../outputs/v4-fix-public-export.pdf`
 - V4 修复公网 PNG：`../outputs/v4-fix-public-export-300dpi.png`
+- V4.1 背景感知公网 PDF：`output/pdf/v4.1-background-aware-public.pdf`
+- V4.1 背景感知公网 PNG：`output/png/v4.1-background-aware-public-300dpi.png`
 
 ---
 
@@ -232,7 +234,7 @@ Cloudflare Pages production 前端已部署 V4.0：项目 `handwrite-studio`，�
 - Filename：`handwrite-studio-v3-final-cleanroom-20260913.zip`
 - SHA-256：`9B472C424B7C22A7410DEC9C3F663F6F9A1E8A68C8EBE1967BC8D8ACEBBAF3C9`
 - File count：184
-- Clean-room：该 ZIP 的 V3.0 验收通过；V4.0 尚未重新打包
+- Clean-room：该 ZIP 的 V3.0 验收通过；V4.1 尚未重新打包
 
 ---
 
