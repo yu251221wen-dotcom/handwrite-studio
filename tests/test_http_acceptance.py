@@ -98,14 +98,23 @@ class HttpAcceptanceTests(unittest.TestCase):
         self.assertEqual(self.request('/api/projects/current', json.dumps(state).encode(), {'Content-Type': 'application/json', 'X-Session-ID': first}, 'PUT')[0], 200)
         self.assertEqual(json.loads(self.request('/api/projects/current', headers={'X-Session-ID': first})[2]), state)
         self.assertEqual(self.request('/api/projects/current', headers={'X-Session-ID': second})[0], 404)
-        image = io.BytesIO(); Image.new('RGB', (100, 140), '#eeeecc').save(image, 'PNG')
-        status, _, body = self.multipart('/api/backgrounds', [('file', 'paper.png', 'image/png', image.getvalue())], session=first)
+        uploaded_assets = []
+        for extension, image_format, media in [('png', 'PNG', 'image/png'), ('jpg', 'JPEG', 'image/jpeg')]:
+            image = io.BytesIO(); Image.new('RGB', (100, 140), '#eeeecc').save(image, image_format)
+            status, _, body = self.multipart('/api/backgrounds', [('file', f'paper.{extension}', media, image.getvalue())], session=first)
+            self.assertEqual(status, 200)
+            uploaded_assets.append(json.loads(body))
+        status, headers, body = self.request('/api/backgrounds', headers={'Origin': 'http://localhost:5173', 'X-Session-ID': first})
         self.assertEqual(status, 200)
-        uploaded = json.loads(body)
-        resource_id = uploaded['id']
-        self.assertTrue(uploaded['fileUrl'].startswith('https://api.example.test/api/backgrounds/'))
-        self.assertEqual(self.request(f'/api/backgrounds/{resource_id}/file?session={second}')[0], 404)
-        self.assertEqual(self.request(f'/api/backgrounds/{resource_id}/file?session={first}')[0], 200)
+        self.assertEqual(headers.get('access-control-allow-origin'), 'http://localhost:5173')
+        self.assertEqual({item['id'] for item in json.loads(body)}, {item['id'] for item in uploaded_assets})
+        for uploaded in uploaded_assets:
+            resource_id = uploaded['id']
+            self.assertTrue(uploaded['fileUrl'].startswith('https://api.example.test/api/backgrounds/'))
+            self.assertEqual(self.request(f'/api/backgrounds/{resource_id}/file?session={second}')[0], 404)
+            status, headers, _ = self.request(f'/api/backgrounds/{resource_id}/file?session={first}', headers={'Origin': 'http://localhost:5173'})
+            self.assertEqual(status, 200)
+            self.assertEqual(headers.get('access-control-allow-origin'), 'http://localhost:5173')
 
     def test_pdf_three_pages_a4_and_unicode_filename(self):
         for width, height in [(1240, 1754), (2480, 3508)]:

@@ -97,7 +97,10 @@ export interface DocumentLayoutSettings {
 export interface LineLayout {
   id: string; pageId: string; fieldId: string; label: string; text: string;
   startIndex: number; endIndex: number; autoX: number; autoY: number;
-  manualOffsetX: number; manualOffsetY: number; lineSnapOffset?: number; rotation: number; fontSize: number;
+  manualOffsetX: number; manualOffsetY: number; lineSnapOffset?: number;
+  /** Physical paper rule selected by the monotonic matcher (before the global baseline offset). */
+  assignedPaperLineY?: number; assignedPaperLineIndex?: number;
+  rotation: number; fontSize: number;
   letterSpacing: number; lineHeight: number; fontId: string; locked: boolean;
   blockId?: string; blockType?: DocumentBlockType; visualKind?: "text" | "heading" | "columns" | "table";
   columnWidths?: number[]; rowIndex?: number; coverageText?: string;

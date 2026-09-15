@@ -5,15 +5,23 @@ const SESSION_KEY = "handwrite-studio-session-v3";
 let sessionPromise: Promise<string> | undefined;
 let sessionRefreshPromise: Promise<string> | undefined;
 
+async function createSessionRequest(): Promise<string> {
+  const request = async () => {
+    const response = await fetch(`${API_BASE_URL}/api/session`, { method: "POST" });
+    if (!response.ok) throw new Error("无法建立私密会话");
+    return (await response.json() as { sessionId: string }).sessionId;
+  };
+  try { return await request(); }
+  catch { return request(); }
+}
+
 export async function getSessionId(): Promise<string> {
   if (typeof window === "undefined") return "";
   const existing = window.sessionStorage.getItem(SESSION_KEY);
   if (existing) return existing;
-  sessionPromise ??= fetch(`${API_BASE_URL}/api/session`, { method: "POST" }).then(async (response) => {
-    if (!response.ok) throw new Error("无法建立私密会话");
-    const result = await response.json() as { sessionId: string };
-    window.sessionStorage.setItem(SESSION_KEY, result.sessionId);
-    return result.sessionId;
+  sessionPromise ??= createSessionRequest().then((sessionId) => {
+    window.sessionStorage.setItem(SESSION_KEY, sessionId);
+    return sessionId;
   }).finally(() => { sessionPromise = undefined; });
   return sessionPromise;
 }
@@ -39,9 +47,24 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     if (activeSessionId) headers.set("X-Session-ID", activeSessionId);
     return fetch(`${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`, { ...init, headers });
   };
-  const response = await request(sessionId);
+  let response: Response;
+  try { response = await request(sessionId); }
+  catch {
+    if (typeof window === "undefined") throw new Error("API 网络连接失败");
+    return request(await refreshSession(sessionId));
+  }
   if (response.status !== 401 || typeof window === "undefined") return response;
   return request(await refreshSession(sessionId));
+}
+
+export async function apiAssetBlob(url: string): Promise<Blob> {
+  const target = new URL(url, API_BASE_URL);
+  if (target.origin !== new URL(API_BASE_URL).origin) throw new Error("资源地址不属于当前 API");
+  let response: Response;
+  try { response = await fetch(target, { mode: "cors" }); }
+  catch { response = await fetch(target, { mode: "cors" }); }
+  if (!response.ok) throw new Error(`背景资源读取失败 (${response.status})`);
+  return response.blob();
 }
 
 export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {

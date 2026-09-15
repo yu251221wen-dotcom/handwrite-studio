@@ -170,29 +170,118 @@ export function snapOffsetForLine(autoY: number, detection?: HorizontalLineDetec
   return target + detection.offsetY - autoY;
 }
 
-export function applyLineSnapping(page: PageState, value: HorizontalLineDetection): PageState {
-  const lineDetection = normalizeLineDetection(value);
-  const offsets = page.lines.map((line) => snapOffsetForLine(line.autoY, lineDetection));
+export interface LineSnapDiagnostic {
+  lineId: string;
+  automaticY: number;
+  paperLineY: number;
+  baselineY: number;
+  difference: number;
+  paperLineIndex: number;
+}
 
-  // Different document line heights can map two adjacent text lines onto the
-  // same paper rule. Keep both lines at their original automatic spacing in
-  // that case instead of producing unreadable overprint. Manual offsets remain
-  // independent and are never considered or overwritten here.
-  const ordered = page.lines.map((line, index) => ({ index, line })).sort((left, right) => left.line.autoY - right.line.autoY);
-  const conflicted = new Set<number>();
-  for (let index = 1; index < ordered.length; index += 1) {
-    const previous = ordered[index - 1];
-    const current = ordered[index];
-    const previousTarget = previous.line.autoY + offsets[previous.index];
-    const currentTarget = current.line.autoY + offsets[current.index];
-    if (Math.abs(currentTarget - previousTarget) < 0.5) {
-      conflicted.add(previous.index);
-      conflicted.add(current.index);
+interface PaperLineCandidate {
+  y: number;
+  index: number;
+}
+
+function completePaperGrid(detection: HorizontalLineDetection, automaticY: number[]): PaperLineCandidate[] {
+  const spacing = detection.averageSpacing;
+  const raw = detection.lineY.map((y, index) => ({ y, index }));
+  if (!raw.length) return [];
+  const minimum = Math.min(...automaticY, raw[0].y);
+  const maximum = Math.max(...automaticY, raw.at(-1)!.y);
+  const completed = [...raw];
+  for (let y = raw[0].y - spacing, index = -1; y >= minimum - spacing * 0.55; y -= spacing, index -= 1) {
+    completed.unshift({ y: Math.round(y * 10) / 10, index });
+  }
+  for (let y = raw.at(-1)!.y + spacing, index = raw.length; y <= maximum + spacing * 0.55; y += spacing, index += 1) {
+    completed.push({ y: Math.round(y * 10) / 10, index });
+  }
+  // Older projects may contain a cropped detection list. Extend the same paper
+  // grid just far enough to keep every document row uniquely assigned.
+  while (completed.length < automaticY.length) {
+    const last = completed.at(-1)!;
+    completed.push({ y: Math.round((last.y + spacing) * 10) / 10, index: last.index + 1 });
+  }
+  return completed;
+}
+
+/**
+ * Globally assigns ordered document rows to ordered paper rules. Dynamic
+ * programming minimizes total movement while strictly increasing the selected
+ * rule index, so two rows can never collapse onto one physical rule.
+ */
+function monotonicPaperAssignment(automaticY: number[], detection: HorizontalLineDetection): PaperLineCandidate[] {
+  const candidates = completePaperGrid(detection, automaticY);
+  const rowCount = automaticY.length;
+  const candidateCount = candidates.length;
+  if (!rowCount || candidateCount < rowCount) return [];
+  const costs = Array.from({ length: rowCount + 1 }, () => Array(candidateCount + 1).fill(Number.POSITIVE_INFINITY));
+  const choices = Array.from({ length: rowCount + 1 }, () => Array(candidateCount + 1).fill(false));
+  for (let candidate = 0; candidate <= candidateCount; candidate += 1) costs[0][candidate] = 0;
+  for (let row = 1; row <= rowCount; row += 1) {
+    for (let candidate = 1; candidate <= candidateCount; candidate += 1) {
+      const skip = costs[row][candidate - 1];
+      const distance = candidates[candidate - 1].y + detection.offsetY - automaticY[row - 1];
+      const assign = costs[row - 1][candidate - 1] + distance * distance;
+      if (assign <= skip) {
+        costs[row][candidate] = assign;
+        choices[row][candidate] = true;
+      } else {
+        costs[row][candidate] = skip;
+      }
     }
   }
+  const result = Array<PaperLineCandidate>(rowCount);
+  let row = rowCount;
+  let candidate = candidateCount;
+  while (row > 0 && candidate > 0) {
+    if (choices[row][candidate]) {
+      result[row - 1] = candidates[candidate - 1];
+      row -= 1;
+    }
+    candidate -= 1;
+  }
+  return row === 0 ? result : [];
+}
+
+export function applyLineSnapping(page: PageState, value: HorizontalLineDetection): PageState {
+  const lineDetection = normalizeLineDetection(value);
+  const enabled = lineDetection.enabled && lineDetection.snapEnabled && lineDetection.lineY.length > 0;
+  const ordered = page.lines.map((line, index) => ({ index, line }))
+    .sort((left, right) => left.line.autoY - right.line.autoY || left.index - right.index);
+  const assignments = enabled ? monotonicPaperAssignment(ordered.map(({ line }) => line.autoY), lineDetection) : [];
+  const byIndex = new Map<number, PaperLineCandidate>();
+  assignments.forEach((assignment, index) => byIndex.set(ordered[index].index, assignment));
   return {
     ...page,
     lineDetection,
-    lines: page.lines.map((line, index) => ({ ...line, lineSnapOffset: conflicted.has(index) ? 0 : offsets[index] })),
+    lines: page.lines.map((line, index) => {
+      const assignment = byIndex.get(index);
+      if (!assignment) {
+        return { ...line, lineSnapOffset: 0, assignedPaperLineY: undefined, assignedPaperLineIndex: undefined };
+      }
+      return {
+        ...line,
+        lineSnapOffset: assignment.y + lineDetection.offsetY - line.autoY,
+        assignedPaperLineY: assignment.y,
+        assignedPaperLineIndex: assignment.index,
+      };
+    }),
   };
+}
+
+export function lineSnapDiagnostics(page: PageState): LineSnapDiagnostic[] {
+  return page.lines.flatMap((line) => line.assignedPaperLineY === undefined || line.assignedPaperLineIndex === undefined ? [] : [{
+    lineId: line.id,
+    automaticY: line.autoY,
+    paperLineY: line.assignedPaperLineY,
+    baselineY: lineYValue(line),
+    difference: lineYValue(line) - line.assignedPaperLineY,
+    paperLineIndex: line.assignedPaperLineIndex,
+  }]);
+}
+
+function lineYValue(line: PageState["lines"][number]): number {
+  return line.autoY + (line.lineSnapOffset ?? 0) + line.manualOffsetY;
 }

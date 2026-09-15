@@ -13,12 +13,12 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { API_BASE_URL, apiFetch, apiJson, getSessionId } from "@/lib/api/client";
+import { API_BASE_URL, apiAssetBlob, apiFetch, apiJson, getSessionId } from "@/lib/api/client";
 import { DEMO_DOCUMENT_NAME, DEMO_INITIAL_FIELDS } from "@/lib/demo/medical-record-fixture";
 import { BACKGROUND_PRESETS, renderBackground } from "@/lib/handwriting/background-library";
 import { A4_PIXELS, PAGE_HEIGHT, PAGE_WIDTH, renderCompositeCanvas, type RenderOptions } from "@/lib/handwriting/canvas-renderer";
 import { ensureFontsReady, FONT_SLOTS, loadUploadedFont } from "@/lib/handwriting/font-library";
-import { applyLineSnapping, DEFAULT_LINE_DETECTION, detectHorizontalLines, normalizeLineDetection, presetHorizontalLines } from "@/lib/background/line-detection";
+import { applyLineSnapping, DEFAULT_LINE_DETECTION, detectHorizontalLines, lineSnapDiagnostics, normalizeLineDetection, presetHorizontalLines } from "@/lib/background/line-detection";
 import { DEFAULT_RANDOMIZATION, PRESET_NATURALITY } from "@/lib/handwriting/randomization";
 import { deserializeProject, documentBlockFingerprint, documentFingerprint, serializeProject } from "@/lib/handwriting/serialization";
 import { nextSeed } from "@/lib/handwriting/seeded-random";
@@ -74,7 +74,7 @@ const exportImageCache = new Map<string, CanvasImageSource>();
 async function loadExportBackground(asset: BackgroundAsset) {
   if (asset.kind !== "uploaded" || !asset.fileUrl) return undefined;
   const cached = exportImageCache.get(asset.id); if (cached) return cached;
-  const bitmap = await createImageBitmap(await (await fetch(asset.fileUrl)).blob()); exportImageCache.set(asset.id, bitmap); return bitmap;
+  const bitmap = await createImageBitmap(await apiAssetBlob(asset.fileUrl)); exportImageCache.set(asset.id, bitmap); return bitmap;
 }
 
 export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "document" | "font" | "background" }) {
@@ -100,6 +100,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   const allLines = project.pages.flatMap((page) => page.lines);
   const selected = allLines.find((line) => line.id === selectedId) ?? allLines[0];
   const currentPage = (project.pages.find((page) => page.pageId === currentPageId) ?? project.pages[0])!;
+  const currentSnapDiagnostics = useMemo(() => lineSnapDiagnostics(currentPage), [currentPage]);
   const activeFontId = selected?.fontId ?? project.selectedFontId;
   const font = fonts.find((item) => item.id === activeFontId) ?? fonts[0];
   const coverage = useMemo(() => validateDocumentCoverage(project.fieldMappings, project.pages, {
@@ -112,16 +113,23 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   ]), [project.fieldMappings, project.documentBlocks]);
 
   useEffect(() => {
-    Promise.all([apiJson<FontAsset[]>("/api/fonts"), apiJson<BackgroundAsset[]>("/api/backgrounds")])
-      .then(async ([uploadedFonts, uploadedBackgrounds]) => {
+    Promise.allSettled([apiJson<FontAsset[]>("/api/fonts"), apiJson<BackgroundAsset[]>("/api/backgrounds")])
+      .then(async ([fontResult, backgroundResult]) => {
+        const uploadedFonts = fontResult.status === "fulfilled" ? fontResult.value : [];
+        const uploadedBackgrounds = backgroundResult.status === "fulfilled" ? backgroundResult.value : [];
         const loaded: FontAsset[] = []; const failed: FontAsset[] = [];
         for (const item of uploadedFonts) {
           try { await loadUploadedFont(item); loaded.push(item); }
           catch (error) { failed.push({ ...item, enabled: false, loadError: error instanceof Error ? error.message : "字体加载失败" }); }
         }
         setFonts([...loaded, ...failed, ...FONT_SLOTS]); setBackgrounds([...uploadedBackgrounds, ...BACKGROUND_PRESETS]);
-        setResourceError(failed.length ? `${failed.length} 个字体未能真正加载，已禁用以避免系统字体回退` : "");
-      }).catch((error) => setResourceError(error instanceof Error ? error.message : "字体与背景资源载入失败"));
+        const errors = [
+          ...(fontResult.status === "rejected" ? [`字体列表：${fontResult.reason instanceof Error ? fontResult.reason.message : "载入失败"}`] : []),
+          ...(backgroundResult.status === "rejected" ? [`背景列表：${backgroundResult.reason instanceof Error ? backgroundResult.reason.message : "载入失败"}`] : []),
+          ...(failed.length ? [`${failed.length} 个字体未能真正加载，已禁用以避免系统字体回退`] : []),
+        ];
+        setResourceError(errors.join("；"));
+      });
   }, []);
 
   useEffect(() => { void getSessionId().then((sessionId) => {
@@ -270,7 +278,24 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
       const success = result.lineY.length >= 3 && result.confidence >= 0.35;
       const next = normalizeLineDetection({ ...DEFAULT_LINE_DETECTION, enabled: success, snapEnabled: success,
         showLines: success, source: background.kind === "preset" ? "preset" : "detected", ...result });
-      updateLineDetection(next);
+      if (success) {
+        const detectedLineHeight = Math.max(28, Math.min(72, Math.round(result.averageSpacing)));
+        const prepared: ProjectState = {
+          ...project,
+          documentLayoutSettings: { ...project.documentLayoutSettings, lineHeight: detectedLineHeight },
+          pages: project.pages.map((page) => ({
+            ...page,
+            lineDetection: page.pageId === currentPage.pageId ? next : page.lineDetection,
+            lines: page.lines.map((line) => ({ ...line, lineHeight: Math.max(line.fontSize + 8, detectedLineHeight) })),
+          })),
+        };
+        const relaid = relayout(project.fieldMappings, prepared);
+        commit(relaid);
+        setSelectedId(relaid.pages.flatMap((page) => page.lines).some((line) => line.id === selectedId) ? selectedId : relaid.pages[0]?.lines[0]?.id ?? "");
+        setCurrentPageId(relaid.pages.some((page) => page.pageId === currentPage.pageId) ? currentPage.pageId : relaid.pages[0]?.pageId ?? "page-1");
+      } else {
+        updateLineDetection(next);
+      }
       if (!success) setResourceError("未可靠检测到水平横线；吸附未启用，可在横线适配中手动添加横线");
     } catch (error) { setResourceError(error instanceof Error ? error.message : "横线检测失败"); }
     finally { setDetectingLines(false); }
@@ -315,7 +340,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
           <PageManager pages={project.pages} currentPageId={currentPage.pageId} onSelect={setCurrentPageId} onAdd={addPage} onDuplicate={copyPage} onMove={reorderPage} onDelete={deletePage} />
         </TabsContent>
         <TabsContent value="font" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<FontManager fonts={fonts} selectedId={activeFontId} onSelect={(id) => selectFont(id)} onUploaded={(asset) => { setFonts((items) => [asset, ...items.filter((item) => item.id !== asset.id)]); selectFont(asset.id, asset); setResourceError(""); }} /></TabsContent>
-        <TabsContent value="background" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<BackgroundManager backgrounds={backgrounds} selectedId={currentPage.backgroundId} adjustments={currentPage.backgroundAdjustments} transform={currentPage.backgroundTransform} lineDetection={normalizeLineDetection(currentPage.lineDetection)} detecting={detectingLines} onSelect={selectBackground} onAdjust={(backgroundAdjustments) => updateCurrentPage({ backgroundAdjustments })} onTransform={(backgroundTransform) => updateCurrentPage({ backgroundTransform })} onLineDetection={updateLineDetection} onDetectLines={() => void detectCurrentBackgroundLines()} onApplySuggestedLayout={(bodyFontSize, lineHeight) => setLayoutSettings({ ...project.documentLayoutSettings, bodyFontSize, lineHeight })} onApplyToAll={() => change((state) => ({ ...state, pages: state.pages.map((page) => applyLineSnapping({ ...page, backgroundId: currentPage.backgroundId, backgroundAdjustments: { ...currentPage.backgroundAdjustments }, backgroundTransform: { ...currentPage.backgroundTransform } }, normalizeLineDetection(currentPage.lineDetection))) }))} onUploaded={(asset) => { setBackgrounds((items) => [asset, ...items.filter((item) => item.id !== asset.id)]); selectBackground(asset.id); }} /></TabsContent>
+        <TabsContent value="background" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<BackgroundManager backgrounds={backgrounds} selectedId={currentPage.backgroundId} adjustments={currentPage.backgroundAdjustments} transform={currentPage.backgroundTransform} lineDetection={normalizeLineDetection(currentPage.lineDetection)} snapDiagnostics={currentSnapDiagnostics} detecting={detectingLines} onSelect={selectBackground} onAdjust={(backgroundAdjustments) => updateCurrentPage({ backgroundAdjustments })} onTransform={(backgroundTransform) => updateCurrentPage({ backgroundTransform })} onLineDetection={updateLineDetection} onDetectLines={() => void detectCurrentBackgroundLines()} onApplySuggestedLayout={(bodyFontSize, lineHeight) => setLayoutSettings({ ...project.documentLayoutSettings, bodyFontSize, lineHeight })} onApplyToAll={() => change((state) => ({ ...state, pages: state.pages.map((page) => applyLineSnapping({ ...page, backgroundId: currentPage.backgroundId, backgroundAdjustments: { ...currentPage.backgroundAdjustments }, backgroundTransform: { ...currentPage.backgroundTransform } }, normalizeLineDetection(currentPage.lineDetection))) }))} onUploaded={(asset) => { setBackgrounds((items) => [asset, ...items.filter((item) => item.id !== asset.id)]); selectBackground(asset.id); }} /></TabsContent>
       </Tabs></aside>
 
       <section className="flex min-h-0 flex-col overflow-hidden bg-[#e7ecef]"><div className="sticky top-0 z-10 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white/80 px-5 text-xs text-slate-500"><span className="flex items-center gap-2"><Grid3X3 className="size-4" />多页 Canvas · 当前第 {currentPage.pageIndex + 1} 页</span><span className="flex items-center gap-2"><Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.max(0.5, value - 0.08))}><Minus /></Button>{Math.round(zoom * 100)}%<Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.min(1.2, value + 0.08))}><Plus /></Button></span></div><div className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center gap-12 overflow-auto p-8 sm:p-12">{project.pages.map((page) => <div key={page.pageId} className="space-y-3"><div className="text-center text-xs text-slate-500">第 {page.pageIndex + 1} 页 · {page.pageType ?? "continuation"}</div><HandwritingCanvas options={optionsFor(page.pageId, true)} zoom={zoom} active={page.pageId === currentPage.pageId} onActivate={() => setCurrentPageId(page.pageId)} onSelectLine={selectLine} onChangeLines={(lines, phase) => onDragLines(page.pageId, lines, phase)} onRenderError={setResourceError} /></div>)}</div></section>

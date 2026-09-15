@@ -2,6 +2,7 @@
 
 import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { apiAssetBlob } from "@/lib/api/client";
 import { PAGE_HEIGHT, PAGE_WIDTH, renderPageBackground, renderTextLayer, type LineBounds, type RenderOptions } from "@/lib/handwriting/canvas-renderer";
 import { ensureFontsReady } from "@/lib/handwriting/font-library";
 import type { LineLayout } from "@/lib/handwriting/types";
@@ -28,11 +29,17 @@ export function HandwritingCanvas({ options, onSelectLine, onChangeLines, zoom =
   useEffect(() => {
     if (options.background.kind !== "uploaded" || !options.background.fileUrl) return;
     const url = options.background.fileUrl;
+    let cancelled = false;
+    let objectUrl = "";
     const next = new Image();
-    next.crossOrigin = "anonymous";
-    next.onload = () => setImageResource({ url, image: next });
+    next.onload = () => { if (!cancelled) setImageResource({ url, image: next }); };
     next.onerror = () => onRenderError?.(`背景 ${options.background.name} 加载失败`);
-    next.src = options.background.fileUrl;
+    void apiAssetBlob(url).then((blob) => {
+      if (cancelled) return;
+      objectUrl = URL.createObjectURL(blob);
+      next.src = objectUrl;
+    }).catch((error) => onRenderError?.(error instanceof Error ? error.message : `背景 ${options.background.name} 加载失败`));
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [options.background, onRenderError]);
 
   const image = options.background.kind === "uploaded" && imageResource && options.background.fileUrl === imageResource.url ? imageResource.image : undefined;

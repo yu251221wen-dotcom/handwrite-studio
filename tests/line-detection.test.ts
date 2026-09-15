@@ -5,6 +5,7 @@ import {
   applyLineSnapping,
   DEFAULT_LINE_DETECTION,
   detectHorizontalLines,
+  lineSnapDiagnostics,
   presetHorizontalLines,
   respaceHorizontalLines,
 } from "../lib/background/line-detection.ts";
@@ -88,13 +89,15 @@ test("snapping preserves manual offsets and cannot alter deterministic handwriti
   const snapped = applyLineSnapping(page, detection);
   assert.equal(snapped.lines[0].manualOffsetY, 7);
   assert.equal(snapped.lines[0].lineSnapOffset, -14);
+  assert.equal(snapped.lines[0].assignedPaperLineY, 80);
+  assert.equal(snapped.lines[0].assignedPaperLineIndex, 1);
   assert.equal(lineY(snapped.lines[0]), 85);
   const options: RenderOptions = { page, pageCount: 1, font: FONT_SLOTS[0], background: BACKGROUND_PRESETS[0], seed: "1001", documentId: "doc",
     handwriting: { preset: "natural", naturality: 52, randomization: DEFAULT_RANDOMIZATION, inkColor: "#123", fixed: true } };
   assert.equal(characterStateKey(line, options), characterStateKey(snapped.lines[0], { ...options, page: snapped }));
 });
 
-test("two document lines can never overprint on the same detected paper rule", () => {
+test("monotonic matching assigns every document row to a unique ordered paper rule", () => {
   const lines = [57, 91, 125, 159, 193, 227, 261, 295, 329].map((autoY, index) => ({
     ...line, id: `line-${index}`, autoY, manualOffsetY: index === 4 ? 7 : 0,
   }));
@@ -104,9 +107,24 @@ test("two document lines can never overprint on the same detected paper rule", (
   const snapped = applyLineSnapping(ruledPage, detection);
   const automaticBaselines = snapped.lines.map((item) => item.autoY + (item.lineSnapOffset ?? 0));
   assert.equal(new Set(automaticBaselines).size, automaticBaselines.length);
-  assert.equal(snapped.lines[3].lineSnapOffset, 0);
-  assert.equal(snapped.lines[4].lineSnapOffset, 0);
+  assert.deepEqual(snapped.lines.map((item) => item.assignedPaperLineY), [45, 90, 135, 180, 225, 270, 315, 360, 405]);
+  assert.deepEqual(snapped.lines.map((item) => item.assignedPaperLineIndex), [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(automaticBaselines.slice(1).map((value, index) => value - automaticBaselines[index]), Array(8).fill(45));
   assert.equal(snapped.lines[4].manualOffsetY, 7);
+  const diagnostics = lineSnapDiagnostics(snapped);
+  assert.equal(new Set(diagnostics.map((item) => item.paperLineIndex)).size, diagnostics.length);
+  assert.deepEqual(diagnostics.map((item) => item.difference), [-2, -2, -2, -2, 5, -2, -2, -2, -2]);
+});
+
+test("disabled snapping clears stored paper assignments without changing manual offsets", () => {
+  const enabled = { ...DEFAULT_LINE_DETECTION, enabled: true, snapEnabled: true,
+    lineY: [40, 80, 120], averageSpacing: 40, offsetY: -2, confidence: 1, source: "manual" as const };
+  const snapped = applyLineSnapping(page, enabled);
+  const restored = applyLineSnapping(snapped, { ...enabled, snapEnabled: false });
+  assert.equal(restored.lines[0].lineSnapOffset, 0);
+  assert.equal(restored.lines[0].assignedPaperLineY, undefined);
+  assert.equal(restored.lines[0].assignedPaperLineIndex, undefined);
+  assert.equal(restored.lines[0].manualOffsetY, 7);
 });
 
 test("applying an uploaded font changes real line font ids without moving line coordinates", () => {
