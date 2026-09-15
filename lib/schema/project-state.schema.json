@@ -35,10 +35,48 @@
     "fieldMappings": { "type": "array", "items": { "$ref": "#/$defs/fieldMapping" } },
     "pages": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/page" } },
     "handwriting": { "type": "object" },
+    "inkStyle": { "$ref": "#/$defs/inkStyle" },
+    "correctionStyle": { "$ref": "#/$defs/correctionStyle" },
+    "footerMode": { "enum": ["auto", "native", "generated", "hidden"] },
     "exportSettings": { "type": "object" },
     "updatedAt": { "type": "string" }
   },
   "$defs": {
+    "inkStyle": {
+      "type": "object",
+      "required": ["enabled", "color", "variation", "bleed", "dryBrush", "brokenInk", "darknessTrend"],
+      "properties": {
+        "enabled": { "type": "boolean" }, "color": { "type": "string" },
+        "variation": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bleed": { "type": "number", "minimum": 0, "maximum": 1 },
+        "dryBrush": { "type": "number", "minimum": 0, "maximum": 1 },
+        "brokenInk": { "type": "number", "minimum": 0, "maximum": 1 },
+        "darknessTrend": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "correctionStyle": {
+      "type": "object",
+      "required": ["enabled", "automatic", "automaticProbability", "marks"],
+      "properties": {
+        "enabled": { "type": "boolean" }, "automatic": { "type": "boolean" },
+        "automaticProbability": { "type": "number", "minimum": 0, "maximum": 0.1 },
+        "marks": { "type": "array", "items": { "$ref": "#/$defs/correctionMark" } }
+      },
+      "additionalProperties": false
+    },
+    "correctionMark": {
+      "type": "object",
+      "required": ["id", "blockId", "sourceStart", "sourceEnd", "sourceText", "type"],
+      "properties": {
+        "id": { "type": "string" }, "blockId": { "type": "string" },
+        "sourceStart": { "type": "integer", "minimum": 0 }, "sourceEnd": { "type": "integer", "minimum": 1 },
+        "sourceText": { "type": "string" },
+        "type": { "enum": ["single-strike", "double-strike", "diagonal", "scribble", "caret", "rewrite-above", "rewrite-side"] },
+        "replacementText": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "documentBlock": {
       "type": "object",
       "required": ["blockId", "type", "sourceOrder", "sourceStart", "sourceEnd", "sourceText"],
@@ -81,6 +119,7 @@
         "pageTemplateId": { "type": ["string", "null"] }, "templateId": { "type": "string" },
         "widthMm": { "const": 210 }, "heightMm": { "const": 297 }, "backgroundId": { "type": "string" },
         "backgroundAdjustments": { "type": "object" }, "backgroundTransform": { "type": "object" },
+        "backgroundHasNativePageFooter": { "type": "boolean" },
         "lineDetection": {
           "type": "object",
           "required": ["enabled", "lineY", "averageSpacing", "confidence", "snapEnabled", "offsetY", "showLines", "firstUsableLine", "lastUsableLine", "writableLeft", "writableRight", "source"],

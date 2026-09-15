@@ -80,7 +80,7 @@ export function HandwritingCanvas({ options, onSelectLine, onChangeLines, zoom =
           const context = canvas.getContext("2d");
           if (!context) return;
           context.setTransform(ratio, 0, 0, ratio, 0, 0);
-          boundsRef.current = renderTextLayer(context, { ...renderOptions, showSelection: true });
+          boundsRef.current = renderTextLayer(context, { ...renderOptions, showSelection: true, isolatedTextLayer: true });
           setRenderError("");
         } catch (error) {
           const message = error instanceof Error ? error.message : "画布绘制失败";

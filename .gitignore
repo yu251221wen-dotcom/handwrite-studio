@@ -48,6 +48,8 @@ next-env.d.ts
 /.codex/
 /data/
 /outputs/
+/output/
+/.logs/
 /work/
 /acceptance-clean/
 /tmp/

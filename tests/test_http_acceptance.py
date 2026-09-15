@@ -67,7 +67,7 @@ class HttpAcceptanceTests(unittest.TestCase):
     def test_health_and_exact_cors(self):
         status, headers, body = self.request('/health', headers={'Origin': 'http://localhost:5173'})
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body)['version'], '4.1.0')
+        self.assertEqual(json.loads(body)['version'], '4.2.0')
         self.assertEqual(headers.get('access-control-allow-origin'), 'http://localhost:5173')
         self.assertNotIn('access-control-allow-origin', self.request('/health', headers={'Origin': 'https://untrusted.example'})[1])
 

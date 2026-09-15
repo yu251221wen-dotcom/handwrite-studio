@@ -79,7 +79,7 @@ class ResourceStore:
         path = self.background_dir / f"{resource_id}{'.png' if is_png else '.jpg'}"
         path.write_bytes(content)
         items = self._read_json(self.background_dir / "index.json", [])
-        item = {"id": resource_id, "name": Path(filename).stem[:80], "kind": "uploaded", "enabled": True, "baseColor": "#fffefb", "pattern": "solid", "filePath": str(path.relative_to(self.root)).replace("\\", "/"), "fileUrl": f"{base_url}/api/backgrounds/{resource_id}/file"}
+        item = {"id": resource_id, "name": Path(filename).stem[:80], "kind": "uploaded", "enabled": True, "baseColor": "#fffefb", "pattern": "solid", "hasNativePageFooter": False, "filePath": str(path.relative_to(self.root)).replace("\\", "/"), "fileUrl": f"{base_url}/api/backgrounds/{resource_id}/file"}
         items = [existing for existing in items if existing.get("id") != resource_id] + [item]
         self._write_json(self.background_dir / "index.json", items)
         return item

@@ -7,6 +7,8 @@ export type LayoutMode = "no-template" | "template";
 export type NoTemplateMode = "preserve-structure" | "simplified";
 export type DocumentBlockType = "heading" | "paragraph" | "key-value" | "list" | "table" | "prescription" | "signature";
 export type PageType = "first" | "continuation" | "blank" | "custom";
+export type PageFooterMode = "auto" | "native" | "generated" | "hidden";
+export type CorrectionType = "single-strike" | "double-strike" | "diagonal" | "scribble" | "caret" | "rewrite-above" | "rewrite-side";
 
 export interface FontAsset {
   id: string; name: string; previewName: string; family: string;
@@ -20,6 +22,8 @@ export interface BackgroundAsset {
   baseColor: string; pattern: BackgroundPattern; lineColor?: string; spacing?: number;
   marginLine?: boolean; texture?: number; shadow?: number; vignette?: number;
   unevenLight?: number; fileUrl?: string; filePath?: string;
+  /** Set by the user/resource metadata; no OCR is used to infer this value. */
+  hasNativePageFooter?: boolean;
 }
 
 export interface BackgroundAdjustments {
@@ -48,6 +52,21 @@ export interface RandomizationConfig {
 export interface HandwritingStyle {
   preset: HandwritingPreset; naturality: number; randomization: RandomizationConfig;
   inkColor: string; fixed: boolean;
+}
+
+export interface InkStyle {
+  enabled: boolean; color: string; variation: number; bleed: number;
+  dryBrush: number; brokenInk: number; darknessTrend: number;
+}
+
+export interface CorrectionMark {
+  id: string; blockId: string; sourceStart: number; sourceEnd: number;
+  sourceText: string; type: CorrectionType; replacementText?: string;
+}
+
+export interface CorrectionStyle {
+  enabled: boolean; automatic: boolean; automaticProbability: number;
+  marks: CorrectionMark[];
 }
 
 export interface FieldMapping {
@@ -106,7 +125,7 @@ export interface LineLayout {
   assignedPaperLineY?: number; assignedPaperLineIndex?: number;
   rotation: number; fontSize: number;
   letterSpacing: number; lineHeight: number; fontId: string; locked: boolean;
-  blockId?: string; blockType?: DocumentBlockType; visualKind?: "text" | "heading" | "columns" | "table";
+  blockId?: string; blockType?: DocumentBlockType; visualKind?: "text" | "heading" | "columns" | "table" | "signature";
   columnWidths?: number[]; rowIndex?: number; coverageText?: string;
   /** Original code-point index for each displayed character; -1 denotes layout whitespace. */
   sourceCharacterIndices?: number[];
@@ -116,6 +135,7 @@ export interface PageState {
   pageId: string; pageIndex: number; templateId: string; widthMm: number; heightMm: number;
   backgroundId: string; backgroundAdjustments: BackgroundAdjustments;
   backgroundTransform: BackgroundTransform; lines: LineLayout[];
+  backgroundHasNativePageFooter?: boolean;
   lineDetection?: HorizontalLineDetection;
   pageType?: PageType; pageTemplateId?: string | null; blockIds?: string[];
 }
@@ -133,9 +153,9 @@ export interface SourceDocumentState {
 }
 export const DEFAULT_DOCUMENT_LAYOUT_SETTINGS: DocumentLayoutSettings = {
   pageSize: "A4", marginTop: 54, marginRight: 58, marginBottom: 58, marginLeft: 58,
-  bodyFontSize: 17, lineHeight: 34, letterSpacing: 1.1, paragraphSpacingBefore: 3,
-  paragraphSpacingAfter: 8, firstLineIndent: 34, headingFontSize: 21,
-  headingSpacingBefore: 14, headingSpacingAfter: 9, keyValueColumns: "auto",
+  bodyFontSize: 17, lineHeight: 34, letterSpacing: 1.1, paragraphSpacingBefore: 0,
+  paragraphSpacingAfter: 0, firstLineIndent: 34, headingFontSize: 21,
+  headingSpacingBefore: 12, headingSpacingAfter: 0, keyValueColumns: "auto",
   prescriptionColumns: "auto", minLinesAtPageBottom: 2, minLinesAtPageTop: 2,
 };
 
@@ -150,6 +170,8 @@ export interface ProjectStateV3 {
   explicitlyIgnoredBlockIds: string[]; documentLayoutSettings: DocumentLayoutSettings;
   seed: string; selectedFontId: string; fieldMappings: FieldMapping[]; pages: PageState[];
   handwriting: HandwritingStyle; exportSettings: ExportSettings; updatedAt: string;
+  /** V4.2 additions are optional only so existing Schema V3 project JSON opens without re-layout. */
+  inkStyle?: InkStyle; correctionStyle?: CorrectionStyle; footerMode?: PageFooterMode;
 }
 export interface ProjectStateV2 {
   schemaVersion: 2; projectVersion: string; id: string; document: SourceDocumentState;

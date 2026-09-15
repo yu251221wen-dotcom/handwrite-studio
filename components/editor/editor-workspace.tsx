@@ -20,9 +20,11 @@ import { A4_PIXELS, PAGE_HEIGHT, PAGE_WIDTH, renderCompositeCanvas, type RenderO
 import { ensureFontsReady, FONT_SLOTS, loadUploadedFont } from "@/lib/handwriting/font-library";
 import { applyLineSnapping, DEFAULT_LINE_DETECTION, detectHorizontalLines, lineSnapDiagnostics, normalizeLineDetection, presetHorizontalLines } from "@/lib/background/line-detection";
 import { DEFAULT_RANDOMIZATION, PRESET_NATURALITY } from "@/lib/handwriting/randomization";
+import { DEFAULT_INK_STYLE, normalizeInkStyle } from "@/lib/handwriting/ink-style";
+import { normalizeCorrectionStyle } from "@/lib/handwriting/correction-style";
 import { deserializeProject, documentBlockFingerprint, documentFingerprint, serializeProject } from "@/lib/handwriting/serialization";
 import { nextSeed } from "@/lib/handwriting/seeded-random";
-import { DEFAULT_DOCUMENT_LAYOUT_SETTINGS, lineX, lineY, type BackgroundAsset, type DocumentBlock, type FieldMapping, type FontAsset, type HandwritingPreset, type HorizontalLineDetection, type LineLayout, type ProjectState, type RandomizationConfig } from "@/lib/handwriting/types";
+import { DEFAULT_DOCUMENT_LAYOUT_SETTINGS, lineX, lineY, type BackgroundAsset, type CorrectionStyle, type CorrectionType, type DocumentBlock, type FieldMapping, type FontAsset, type HandwritingPreset, type HorizontalLineDetection, type InkStyle, type LineLayout, type PageFooterMode, type ProjectState, type RandomizationConfig } from "@/lib/handwriting/types";
 import { commitGesture, commitHistory, createHistory, redoHistory, replacePresent, undoHistory } from "@/lib/history/history-store";
 import { validateDocumentCoverage } from "@/lib/layout/coverage";
 import { applyFontToPages, layoutProjectPages } from "@/lib/layout/project-layout";
@@ -47,7 +49,7 @@ function makeProject(fields = DEMO_INITIAL_FIELDS, name = DEMO_DOCUMENT_NAME, ra
   const font = FONT_SLOTS.find((item) => item.id === fontId) ?? FONT_SLOTS[0];
   const demo = demoBlocks(fields); const documentId = documentFingerprint(demo.fields);
   const base: ProjectState = {
-    schemaVersion: 3, projectVersion: "4.1.0", id: previous?.id ?? "current",
+    schemaVersion: 3, projectVersion: "4.2.0", id: previous?.id ?? "current",
     document: { id: documentId, name, rawTexts, sourceCharacterCount: fields.reduce((sum, field) => sum + Array.from(field.value).length, 0) },
     layoutMode: "no-template", noTemplateMode: previous?.noTemplateMode ?? "preserve-structure",
     templateId: null, documentBlocks: demo.blocks,
@@ -55,6 +57,8 @@ function makeProject(fields = DEMO_INITIAL_FIELDS, name = DEMO_DOCUMENT_NAME, ra
     documentLayoutSettings: previous?.documentLayoutSettings ?? { ...DEFAULT_DOCUMENT_LAYOUT_SETTINGS },
     seed: previous?.seed ?? "1001", selectedFontId: fontId, fieldMappings: demo.fields, pages: previous?.pages ?? [],
     handwriting: previous?.handwriting ?? { preset: "natural", naturality: PRESET_NATURALITY.natural, randomization: { ...DEFAULT_RANDOMIZATION }, inkColor: "#163d64", fixed: false },
+    inkStyle: normalizeInkStyle(previous?.inkStyle, previous?.handwriting.inkColor),
+    correctionStyle: normalizeCorrectionStyle(previous?.correctionStyle), footerMode: previous?.footerMode ?? "auto",
     exportSettings: previous?.exportSettings ?? { pageSize: "A4", dpi: 300, format: "png", jpgQuality: 0.9 }, updatedAt: new Date().toISOString(),
   };
   return { ...base, pages: layoutProjectPages(base, createApproximateTextMeasurer(), font) };
@@ -86,6 +90,11 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   const [currentPageId, setCurrentPageId] = useState(project.pages[0]?.pageId ?? "page-1");
   const [activeTab, setActiveTab] = useState(initialTab);
   const [advanced, setAdvanced] = useState(false);
+  const [appearanceOpen, setAppearanceOpen] = useState(true);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correctionTarget, setCorrectionTarget] = useState("");
+  const [correctionReplacement, setCorrectionReplacement] = useState("");
+  const [correctionType, setCorrectionType] = useState<CorrectionType>("single-strike");
   const [zoom, setZoom] = useState(0.82);
   const [parseStatus, setParseStatus] = useState("已载入示例内容");
   const [resourceError, setResourceError] = useState("");
@@ -100,6 +109,9 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   const allLines = project.pages.flatMap((page) => page.lines);
   const selected = allLines.find((line) => line.id === selectedId) ?? allLines[0];
   const currentPage = (project.pages.find((page) => page.pageId === currentPageId) ?? project.pages[0])!;
+  const currentBackground = backgrounds.find((item) => item.id === currentPage.backgroundId) ?? backgrounds[0];
+  const inkStyle = normalizeInkStyle(project.inkStyle, project.handwriting.inkColor);
+  const correctionStyle = normalizeCorrectionStyle(project.correctionStyle);
   const currentSnapDiagnostics = useMemo(() => lineSnapDiagnostics(currentPage), [currentPage]);
   const activeFontId = selected?.fontId ?? project.selectedFontId;
   const font = fonts.find((item) => item.id === activeFontId) ?? fonts[0];
@@ -171,6 +183,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
     const page = project.pages.find((item) => item.pageId === pageId) ?? project.pages[0];
     const pageBackground = backgrounds.find((item) => item.id === page.backgroundId) ?? backgrounds[0];
     return { page, pageCount: project.pages.length, font, fonts, background: pageBackground, handwriting: project.handwriting,
+      inkStyle, correctionStyle, footerMode: project.footerMode ?? "auto",
       seed: project.seed, documentId: project.document.id, patientFields, fieldTextById, selectedLineId: selectedId, showLineGuides };
   };
 
@@ -196,6 +209,25 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   const setHandwriting = (patch: Partial<ProjectState["handwriting"]>) => change((state) => ({ ...state, handwriting: { ...state.handwriting, ...patch } }));
   const updateRandomization = (key: keyof RandomizationConfig, value: number) => setHandwriting({ randomization: { ...project.handwriting.randomization, [key]: value } });
   const choosePreset = (preset: HandwritingPreset) => setHandwriting({ preset, naturality: PRESET_NATURALITY[preset] });
+  const setInkStyle = (patch: Partial<InkStyle>) => change((state) => ({ ...state, inkStyle: { ...normalizeInkStyle(state.inkStyle, state.handwriting.inkColor), ...patch },
+    handwriting: patch.color ? { ...state.handwriting, inkColor: patch.color } : state.handwriting }));
+  const setCorrectionStyle = (patch: Partial<CorrectionStyle>) => change((state) => ({ ...state, correctionStyle: { ...normalizeCorrectionStyle(state.correctionStyle), ...patch } }));
+  const addCorrection = () => {
+    if (!selected || !correctionTarget.trim()) { setResourceError("请先输入当前行中需要涂改的原文"); return; }
+    const lineChars = Array.from(selected.text); const targetChars = Array.from(correctionTarget.trim());
+    let localStart = -1;
+    for (let index = 0; index <= lineChars.length - targetChars.length; index += 1) {
+      if (targetChars.every((character, offset) => lineChars[index + offset] === character)) { localStart = index; break; }
+    }
+    if (localStart < 0) { setResourceError("涂改原文必须完整出现在当前选中行内"); return; }
+    const sourceIndices = (selected.sourceCharacterIndices ?? lineChars.map((_, index) => selected.startIndex + index)).slice(localStart, localStart + targetChars.length).filter((value) => value >= 0);
+    if (!sourceIndices.length) { setResourceError("所选内容没有可锚定的原文字索引"); return; }
+    const blockId = selected.blockId ?? selected.fieldId;
+    const mark = { id: `manual:${blockId}:${sourceIndices[0]}:${correctionType}:${correctionStyle.marks.length}`,
+      blockId, sourceStart: sourceIndices[0], sourceEnd: sourceIndices.at(-1)! + 1, sourceText: correctionTarget.trim(),
+      type: correctionType, ...(correctionReplacement.trim() ? { replacementText: correctionReplacement.trim() } : {}) };
+    setCorrectionStyle({ marks: [...correctionStyle.marks, mark] }); setCorrectionTarget(""); setCorrectionReplacement(""); setResourceError("");
+  };
 
   const uploadDocx = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; if (!file) return;
@@ -275,8 +307,10 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
     commitBackgroundRelayout(base);
   };
   const selectBackground = (backgroundId: string) => {
+    const asset = backgrounds.find((item) => item.id === backgroundId);
     const hadPaperLayout = project.pages.some((page) => page.pageType !== "blank" && page.pageType !== "custom" && normalizeLineDetection(page.lineDetection).enabled);
-    const base = { ...project, pages: project.pages.map((page) => page.pageId === currentPage.pageId ? { ...page, backgroundId, lineDetection: { ...DEFAULT_LINE_DETECTION } } : hadPaperLayout && page.pageType !== "blank" && page.pageType !== "custom" ? { ...page, lineDetection: { ...DEFAULT_LINE_DETECTION } } : page) };
+    const base = { ...project, pages: project.pages.map((page) => page.pageId === currentPage.pageId ? { ...page, backgroundId,
+      backgroundHasNativePageFooter: asset?.hasNativePageFooter ?? false, lineDetection: { ...DEFAULT_LINE_DETECTION } } : hadPaperLayout && page.pageType !== "blank" && page.pageType !== "custom" ? { ...page, lineDetection: { ...DEFAULT_LINE_DETECTION } } : page) };
     if (hadPaperLayout) commitBackgroundRelayout(base); else commit(base);
   };
   const applyCurrentPaperLayoutToAll = () => {
@@ -286,6 +320,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
       backgroundId: currentPage.backgroundId,
       backgroundAdjustments: { ...currentPage.backgroundAdjustments },
       backgroundTransform: { ...currentPage.backgroundTransform },
+      backgroundHasNativePageFooter: currentPage.backgroundHasNativePageFooter,
       lineDetection: detection,
     }) };
     commitBackgroundRelayout(base);
@@ -352,7 +387,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   };
   return <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f6f8] text-slate-900">
     <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white/95 px-2 backdrop-blur sm:px-7">
-      <div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#153f49] text-white"><FileText className="size-4.5" /></div><div className="hidden min-w-0 sm:block"><div className="flex items-center gap-2"><h1 className="text-[15px] font-semibold">墨迹排版台 V4.1</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost") ? "本地隐私模式" : "在线临时会话"}</span></div><p className="max-w-96 truncate text-xs text-slate-400">{project.document.name} · {project.pages.length} 页 · {project.noTemplateMode === "preserve-structure" ? "保留结构" : "简化正文"} · Seed {project.seed} · {saveStatus}</p></div></div>
+      <div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#153f49] text-white"><FileText className="size-4.5" /></div><div className="hidden min-w-0 sm:block"><div className="flex items-center gap-2"><h1 className="text-[15px] font-semibold">墨迹排版台 V4.2</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost") ? "本地隐私模式" : "在线临时会话"}</span></div><p className="max-w-96 truncate text-xs text-slate-400">{project.document.name} · {project.pages.length} 页 · {project.noTemplateMode === "preserve-structure" ? "保留结构" : "简化正文"} · Seed {project.seed} · {saveStatus}</p></div></div>
       <div className="flex items-center gap-1.5"><label aria-label="导入 DOCX" className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 xl:hidden"><Upload className="size-4" /><input className="sr-only" type="file" accept=".docx" onChange={uploadDocx} /></label><select aria-label="导出格式" className="h-8 rounded-md border border-slate-200 bg-white px-1 text-[11px] xl:hidden" value={project.exportSettings.format} onChange={(event) => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, format: event.target.value as "png" | "jpg" | "pdf" } }))}><option value="png">PNG</option><option value="jpg">JPG</option><option value="pdf">PDF</option></select><Button className="xl:hidden" variant="ghost" size="icon-sm" disabled={project.handwriting.fixed} onClick={() => change((state) => ({ ...state, seed: nextSeed(state.seed) }))} aria-label="换一种笔迹"><RefreshCw /></Button><Button variant="ghost" size="icon-sm" disabled={!history.past.length} onClick={() => setHistory(undoHistory)} aria-label="撤销"><Undo2 /></Button><Button variant="ghost" size="icon-sm" disabled={!history.future.length} onClick={() => setHistory(redoHistory)} aria-label="重做"><Redo2 /></Button><Button variant="outline" className="hidden rounded-lg md:inline-flex" onClick={saveProject}><Save />保存项目</Button><Button className="rounded-lg bg-[#d96945] text-white hover:bg-[#bf5737]" onClick={exportDocument}><Download />导出 {project.exportSettings.format.toUpperCase()}</Button></div>
     </header>
 
@@ -388,6 +423,24 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
         ] as const).map(([key, label, max, unit]) => <RangeRow disabled={project.handwriting.fixed} key={key} label={label} value={project.handwriting.randomization[key]} display={`${project.handwriting.randomization[key].toFixed(1)} ${unit}`} min={0} max={max} step={0.1} onChange={(value) => updateRandomization(key, value)} />)}{([
           ["characterFontSizeVariation", "字号波动", 8], ["characterScaleX", "宽度波动", 8], ["characterScaleY", "高度波动", 8], ["characterOpacityVariation", "深浅波动", 12],
         ] as const).map(([key, label, max]) => <RangeRow disabled={project.handwriting.fixed} key={key} label={label} value={project.handwriting.randomization[key] * 100} display={`${(project.handwriting.randomization[key] * 100).toFixed(1)}%`} min={0} max={max} step={0.1} onChange={(value) => updateRandomization(key, value / 100)} />)}</CollapsibleContent></Collapsible>
+        <Collapsible open={appearanceOpen} onOpenChange={setAppearanceOpen} className="mt-4 border-t border-slate-100 pt-4"><CollapsibleTrigger className="flex w-full items-center justify-between py-2 text-sm font-semibold">墨迹效果 <ChevronDown className={`size-4 transition ${appearanceOpen ? "rotate-180" : ""}`} /></CollapsibleTrigger><CollapsibleContent className="space-y-4 pt-3">
+          <div className="space-y-2"><span className="text-sm text-slate-700">墨水颜色</span><div className="flex items-center gap-2">{["#142f4f", "#163d64", "#20558a", "#17191c"].map((color) => <button key={color} aria-label={`墨色 ${color}`} onClick={() => setInkStyle({ color })} className={`size-7 rounded-full border-2 ${inkStyle.color === color ? "border-[#d96945]" : "border-white ring-1 ring-slate-200"}`} style={{ backgroundColor: color }} />)}<input aria-label="自定义墨色" type="color" value={inkStyle.color} onChange={(event) => setInkStyle({ color: event.target.value })} className="h-7 w-9 cursor-pointer rounded border border-slate-200 bg-white p-0.5" /></div></div>
+          <RangeRow label="墨色波动" value={inkStyle.variation * 100} display={`${Math.round(inkStyle.variation * 100)}%`} min={0} max={50} onChange={(value) => setInkStyle({ variation: value / 100 })} />
+          <RangeRow label="轻微洇墨" value={inkStyle.bleed * 100} display={`${Math.round(inkStyle.bleed * 100)}%`} min={0} max={45} onChange={(value) => setInkStyle({ bleed: value / 100 })} />
+          <RangeRow label="飞白" value={inkStyle.dryBrush * 100} display={`${Math.round(inkStyle.dryBrush * 100)}%`} min={0} max={20} onChange={(value) => setInkStyle({ dryBrush: value / 100 })} />
+          <RangeRow label="断墨" value={inkStyle.brokenInk * 100} display={`${Math.round(inkStyle.brokenInk * 100)}%`} min={0} max={12} onChange={(value) => setInkStyle({ brokenInk: value / 100 })} />
+          <Button size="sm" variant="outline" className="w-full" onClick={() => setInkStyle({ ...DEFAULT_INK_STYLE })}>恢复自然墨迹</Button>
+        </CollapsibleContent></Collapsible>
+        <Collapsible open={correctionOpen} onOpenChange={setCorrectionOpen} className="mt-4 border-t border-slate-100 pt-4"><CollapsibleTrigger className="flex w-full items-center justify-between py-2 text-sm font-semibold">涂改与补写 <ChevronDown className={`size-4 transition ${correctionOpen ? "rotate-180" : ""}`} /></CollapsibleTrigger><CollapsibleContent className="space-y-3 pt-3">
+          <select aria-label="涂改样式" value={correctionType} onChange={(event) => setCorrectionType(event.target.value as CorrectionType)} className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm"><option value="single-strike">单删除线</option><option value="double-strike">双删除线</option><option value="diagonal">斜划线</option><option value="scribble">涂抹</option><option value="caret">插入号</option><option value="rewrite-above">上方改写</option><option value="rewrite-side">旁侧改写</option></select>
+          <input aria-label="涂改原文" value={correctionTarget} onChange={(event) => setCorrectionTarget(event.target.value)} placeholder="当前行中的原文" className="h-9 w-full rounded-md border border-slate-200 px-2 text-sm" />
+          <input aria-label="补写文字" value={correctionReplacement} onChange={(event) => setCorrectionReplacement(event.target.value)} placeholder="补写文字（可选）" className="h-9 w-full rounded-md border border-slate-200 px-2 text-sm" />
+          <Button size="sm" className="w-full" onClick={addCorrection}>添加到当前行</Button>
+          <div className="flex items-center justify-between text-sm"><span>安全文本自动涂改</span><Switch checked={correctionStyle.automatic} onCheckedChange={(automatic) => setCorrectionStyle({ automatic })} aria-label="自动涂改" /></div>
+          {correctionStyle.automatic && <RangeRow label="自动概率" value={correctionStyle.automaticProbability * 100} display={`${correctionStyle.automaticProbability.toFixed(3)}`} min={0} max={3} step={0.1} onChange={(value) => setCorrectionStyle({ automaticProbability: value / 100 })} />}
+          {correctionStyle.marks.filter((mark) => mark.blockId === (selected.blockId ?? selected.fieldId)).map((mark) => <div key={mark.id} className="flex items-center justify-between rounded-md bg-slate-50 px-2 py-1 text-xs"><span className="truncate">{mark.sourceText} · {mark.type}</span><button className="text-rose-600" onClick={() => setCorrectionStyle({ marks: correctionStyle.marks.filter((item) => item.id !== mark.id) })}>移除</button></div>)}
+        </CollapsibleContent></Collapsible>
+        <div className="mt-4 space-y-3 border-t border-slate-100 pt-4"><h3 className="text-sm font-semibold">纸张页码</h3><select aria-label="页码模式" value={project.footerMode ?? "auto"} onChange={(event) => change((state) => ({ ...state, footerMode: event.target.value as PageFooterMode }))} className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm"><option value="auto">自动（按背景标记）</option><option value="native">使用纸张原生页码</option><option value="generated">生成居中页码</option><option value="hidden">隐藏页码</option></select><div className="flex items-center justify-between text-sm"><span>当前背景自带页码</span><Switch checked={currentPage.backgroundHasNativePageFooter ?? currentBackground.hasNativePageFooter ?? false} onCheckedChange={(backgroundHasNativePageFooter) => updateCurrentPage({ backgroundHasNativePageFooter })} aria-label="背景自带页码" /></div></div>
         <div className="mt-5 space-y-3 border-t border-slate-100 pt-4"><h3 className="text-sm font-semibold">导出设置</h3><div className="grid grid-cols-3 gap-1">{([150, 300, 600] as const).map((dpi) => <Button key={dpi} size="sm" variant={project.exportSettings.dpi === dpi ? "default" : "outline"} onClick={() => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, dpi } }))}>{dpi} DPI</Button>)}</div><div className="grid grid-cols-3 gap-1">{(["png", "jpg", "pdf"] as const).map((format) => <Button key={format} size="sm" variant={project.exportSettings.format === format ? "default" : "outline"} onClick={() => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, format } }))}>{format.toUpperCase()}</Button>)}</div>{project.exportSettings.format === "jpg" && <RangeRow label="JPG 质量" value={Math.round(project.exportSettings.jpgQuality * 100)} display={`${Math.round(project.exportSettings.jpgQuality * 100)}%`} min={40} max={100} onChange={(quality) => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, jpgQuality: quality / 100 } }))} />}<p className="text-xs leading-5 text-slate-400">{exportStatus || `默认 300 DPI：${A4_PIXELS[300].width}×${A4_PIXELS[300].height}`}</p></div>
       </> : <p className="text-sm text-slate-400">暂无可编辑行</p>}</aside>
     </div>

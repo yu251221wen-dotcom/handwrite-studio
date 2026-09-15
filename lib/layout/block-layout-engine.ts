@@ -111,11 +111,23 @@ function blockToUnit(block: DocumentBlock, input: BlockLayoutInput): BlockUnit {
   } else if (block.type === "table" && !simple) {
     lines = structuredRows(block, block.rows, input, "table");
   } else if (block.type === "prescription" && !simple) {
-    const count = columnsFor(input.settings.prescriptionColumns, A4_WIDTH - input.settings.marginLeft - input.settings.marginRight, 3);
+    // Clinical prescriptions default to four fixed logical anchors. Each drug +
+    // dose remains one atomic cell and each row consumes exactly one paper slot.
+    const count = columnsFor(input.settings.prescriptionColumns, A4_WIDTH - input.settings.marginLeft - input.settings.marginRight, 4);
     const rows = Array.from({ length: Math.ceil(block.items.length / count) }, (_, index) => block.items.slice(index * count, (index + 1) * count).map((item) => item.raw));
     lines = structuredRows(block, rows, input, "columns");
   } else if (block.type === "signature" && !simple) {
-    lines = structuredRows(block, [block.entries.map((entry) => entry.raw)], input, "columns");
+    // Signatures participate in normal document flow, one entry per row, and
+    // are kept together. They are never pinned to the physical page bottom.
+    lines = block.entries.map((entry, index) => baseLine(block, `${block.blockId}:signature:${index}`, entry.raw,
+      block.entries.slice(0, index).reduce((sum, item) => sum + Array.from(item.raw).length, 0), input,
+      input.settings.bodyFontSize, input.settings.lineHeight, "signature"));
+    lines = lines.map((line) => {
+      const width = input.measurer.measure(line.text, { fontFamily: input.fontFamily, fontSize: line.fontSize, letterSpacing: line.letterSpacing });
+      return { ...line, autoX: A4_WIDTH - input.settings.marginRight - width };
+    });
+    spacingBefore = input.settings.lineHeight;
+    spacingAfter = 0;
     allowSplit = false;
   } else if (block.type === "list") {
     // Diagnostic/list items are intentionally denser than prose while normal
@@ -181,11 +193,21 @@ function paginateOnPaperLines(
   page = makePage();
   const nextPage = () => { page = makePage(); };
 
+  const paperGapBefore = (unit: BlockUnit) => {
+    if (slot === 0) return 0;
+    if (unit.block.type === "heading" || unit.block.type === "signature") {
+      return Math.min(1, paperSlotGap(unit.spacingBefore, grid.averageSpacing));
+    }
+    return 0;
+  };
+
   for (let unitIndex = 0; unitIndex < units.length; unitIndex += 1) {
     const unit = units[unitIndex];
     if (!unit.lines.length) continue;
     const nextUnit = units[unitIndex + 1];
-    let gapBefore = slot === 0 ? 0 : paperSlotGap(unit.spacingBefore, grid.averageSpacing);
+    // On ruled paper a paragraph/list/diagnosis boundary is not a blank-line
+    // instruction. Only a heading/signature may consume one structural slot.
+    let gapBefore = paperGapBefore(unit);
     const availableLines = grid.usableLineCount - slot - gapBefore;
     const requiredWithNext = unit.keepWithNext ? unit.lines.length + Math.min(unit.minLinesAfter, nextUnit?.lines.length ?? 0) : 0;
     if ((requiredWithNext > 0 && requiredWithNext <= grid.usableLineCount && availableLines < requiredWithNext) ||
@@ -231,8 +253,7 @@ function paginateOnPaperLines(
       }
       if (lineIndex < unit.lines.length) nextPage();
     }
-    const gapAfter = paperSlotGap(unit.spacingAfter, grid.averageSpacing);
-    slot += Math.min(gapAfter, Math.max(0, grid.usableLineCount - slot));
+    // No trailing paper slot: the next structural block decides its own gap.
   }
 
   for (const manual of trailingManualPages) {

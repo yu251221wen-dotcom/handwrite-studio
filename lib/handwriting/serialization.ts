@@ -3,6 +3,8 @@ import { DEFAULT_DOCUMENT_LAYOUT_SETTINGS } from "./types.ts";
 import type { DocumentBlock, FieldMapping, LineLayout, ProjectState, ProjectStateV1, ProjectStateV2 } from "./types.ts";
 import { mapSourceCharacters } from "./source-character-map.ts";
 import { applyLineSnapping, DEFAULT_LINE_DETECTION, normalizeLineDetection } from "../background/line-detection.ts";
+import { normalizeCorrectionStyle } from "./correction-style.ts";
+import { normalizeInkStyle } from "./ink-style.ts";
 
 export function serializeProject(state: ProjectState): string {
   return JSON.stringify(disableLegacyTemplateState({ ...state, updatedAt: new Date().toISOString() }), null, 2);
@@ -11,11 +13,14 @@ export function serializeProject(state: ProjectState): string {
 function disableLegacyTemplateState(state: ProjectState): ProjectState {
   return {
     ...state,
-    projectVersion: "4.1.0",
+    projectVersion: "4.2.0",
     layoutMode: "no-template",
     templateId: null,
     mappedBlockIds: [],
     unmappedBlockIds: [],
+    inkStyle: normalizeInkStyle(state.inkStyle, state.handwriting.inkColor),
+    correctionStyle: normalizeCorrectionStyle(state.correctionStyle),
+    footerMode: state.footerMode ?? "auto",
     pages: state.pages.map((page) => applyLineSnapping(page, normalizeLineDetection(page.lineDetection ?? DEFAULT_LINE_DETECTION))),
   };
 }
@@ -73,10 +78,11 @@ export function migrateProjectV2(old: ProjectStateV2): ProjectState {
   });
   const blockByField = new Map(old.fieldMappings.map((field) => [field.id, `v2-field-${field.id}`]));
   return {
-    ...old, schemaVersion: 3, projectVersion: "4.1.0", layoutMode: "no-template",
+    ...old, schemaVersion: 3, projectVersion: "4.2.0", layoutMode: "no-template",
     noTemplateMode: "preserve-structure", templateId: null, documentBlocks,
     mappedBlockIds: [], unmappedBlockIds: [],
     explicitlyIgnoredBlockIds: [], documentLayoutSettings: { ...DEFAULT_DOCUMENT_LAYOUT_SETTINGS },
+    inkStyle: normalizeInkStyle(undefined, old.handwriting.inkColor), correctionStyle: normalizeCorrectionStyle(), footerMode: "auto",
     fieldMappings: old.fieldMappings.map((field) => ({ ...field, sourceBlockIds: field.sourceBlockIds ?? [blockByField.get(field.id)!] })),
     pages: old.pages.map((page, pageIndex) => ({ ...page, pageIndex,
       pageType: pageIndex === 0 ? "first" : "continuation", pageTemplateId: page.templateId,
