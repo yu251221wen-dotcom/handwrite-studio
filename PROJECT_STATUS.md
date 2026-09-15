@@ -8,14 +8,15 @@
 
 ## 当前版本
 
-- Version：4.1.0（V4.1）
+- Version：4.2.0（V4.2，本地已完成；公网待推送授权）
 - SchemaVersion：3
-- 更新日期：2026-09-15
+- 更新日期：2026-09-16
 - GitHub：`https://github.com/yu251221wen-dotcom/handwrite-studio`
 - V4 实现提交：`e6926cdf07dd0116e68ee6d9c34243de65596448`
 - 横线吸附防重叠修复：`41ebf6e55ecb345c7c3b6534c51a3addff629405`
 - V4 公网背景与单调吸附修复：`e83bb92`
 - V4.1 背景感知纸线槽位布局：`1282c2f`
+- V4.2 排版与手写外观：`3a24d79`
 
 ---
 
@@ -72,6 +73,13 @@
 - [x] 背景感知纸线槽位布局（横线纸以检测到的物理纸线作为纵向主坐标系）
 - [x] 第一/最后可写横线、左右可写边界和基线偏移手动校准
 - [x] 连续正文/列表逐纸线排布；标题和段间距用整条纸线槽位表达
+- [x] V4.2 横线纸连续槽位：普通 Block 不留空行、标题/签名前至多一槽
+- [x] 处方自动四列固定锚点、长药名单元内收缩与裁切
+- [x] 签名正文流右对齐、整体续页、不固定页底
+- [x] 页码 auto/native/generated/hidden；程序页码底部居中且可避让原生页码
+- [x] 独立 InkStyle：墨色、低频深浅、洇墨、飞白、断墨
+- [x] 独立 CorrectionStyle：手动划改/涂抹/插入/补写与保守自动模式
+- [x] V4.2 外观状态保存到 Schema V3 JSON；旧 V3 无重排补默认值
 - [x] 可写纸线耗尽后自动分页；不再在检测范围外虚构纸线
 - [x] character-level handwriting
 - [x] deterministic Seed
@@ -107,13 +115,13 @@
 
 - 透视校正
 - OCR
-- 字形级手写增强
+- SVG Path / 笔画级字形扰动（本轮仅做 Canvas 墨迹外观层）
 
 ---
 
 ## 当前最高优先级
 
-当前阶段：V4.1 背景感知布局已完成并部署公网
+当前阶段：V4.2 本地实现和验收已完成，等待明确授权推送到现有 GitHub `main` 并触发公网部署
 
 1. Cloudflare Pages 正式前端保持可用
 2. 保持 Session isolation、精确 CORS 和 `/health`
@@ -125,24 +133,32 @@
 
 ## 下一阶段
 
-V4.1 完成后，下一阶段可进入 V5 纸张倾斜和四角透视校准，但在用户明确开始前不提前开发；OCR、AI 字段匹配和 AI 字迹继续暂缓。
+下一阶段仅建议 **V4.3 Real-case Polish**：继续用真实但不公开的本地样本做处方、签名、复杂页尾和墨迹参数微调。透视、OCR、AI 字段匹配和 AI 字迹继续暂缓。
 
 ---
 
 ## 最近测试结果
 
-- TypeScript：39 / 39 通过
+- TypeScript：45 / 45 通过
 - Python：16 / 16 通过
 - Typecheck：通过
 - ESLint：0 error
 - Build：Vinext production build 通过
 - Cloudflare Pages 静态导出：通过；4 个正式路由均生成到 `out/`
-- FastAPI health：本地与公网均通过，`status=ok`、`version=4.1.0`
+- FastAPI health：本地通过，`status=ok`、`version=4.2.0`；公网仍为 V4.1，待推送部署
 - Golden Test：Raw 3657 / Laid out 3657 / Missing 0；实际 Canvas `fillText` 覆盖率通过
 - 公网 DOCX：合成长文档 Raw 3097 / Laid out 3097 / Missing 0，DocumentBlock 5，自动排版 7 页
 - 横线检测：标准/噪声/粗线双边缘合并单测通过；纯白背景不会误启用吸附
 - 横线布局：检测纸线是纵向主坐标系；正文/列表连续占用物理纸线；纸线索引严格递增；重复分配为 0；纸线不足时分页，不在边缘外延伸虚构纸线
 - 背景感知 Golden：Raw 3657 / Laid out 3657 / Missing 0；每页 20 条可写纸线，共 10 页
+- V4.2 Golden：Preserve structure 9 页、Simplified 9 页、背景感知 10 页；Raw 3657 / Laid out 3657 / Missing 0；Canvas 实际字符绘制覆盖通过
+- V4.2 排版：处方 `auto` 为 `4 + 4 + 1` 单元；签名两行整体续页并右对齐；普通段落/列表连续占用纸线槽位
+- V4.2 墨迹：同参数同 Seed 完全一致、换 Seed 不同；key 不含 pageIndex/x/y/background；飞白/断墨只在透明文字层切出细纹，不擦除背景
+- V4.2 页码：程序页码位于底部中央；背景标记原生页码后程序页码隐藏；两种状态均经浏览器预览和 300 DPI PNG 验证
+- V4.2 涂改：合成示例“姓名”双删除线与“患者”上方补写进入最终导出；原文字仍完整绘制，Missing 保持 0
+- V4.2 浏览器：三栏 UI、墨迹面板、涂改面板、页码模式实际可操作；编辑器和 Showcase 控制台 0 error/warning
+- V4.2 PNG：浏览器真实导出并程序读取为 2480 × 3508 RGBA PNG
+- V4.2 PDF：当前 FastAPI 真实生成 3 页，程序读取 page count = 3；每页约 595.28 × 842.03 pt（A4），Poppler 回渲检查通过
 - V4.1 浏览器验收：淡蓝横线 40 识别 21 条，连续正文使用相邻纸线；首尾可写横线改为 3–6 后自动分为 2 页；恢复后 1–21 行，左右边界校准生效
 - 公网横线预设：轻噪扫描横线纸识别 18 条，置信度 100%
 - 公网上传背景：真实 UI 连续上传合成 PNG 与 JPG 均成功；同一 Session 列表可见两项，上传资源按 Session 隔离
@@ -174,10 +190,10 @@ V4.1 完整源码测试、本地验收和公网验收均已通过。正式 ZIP �
 
 ## 当前本地地址
 
-- Frontend：V4.1 运行于 `http://localhost:5173/`
-- Showcase：V4.1 可由 `http://localhost:5173/showcase` 验收
-- Backend：V4.1 运行于 `http://127.0.0.1:8000`
-- Health：本地与公网均验证 `status=ok`、`version=4.1.0`
+- Frontend：V4.2 运行于 `http://localhost:5173/`
+- Showcase：V4.2 运行于 `http://localhost:5173/showcase`
+- Backend：V4.2 运行于 `http://127.0.0.1:8000`
+- Health：本地验证 `status=ok`、`version=4.2.0`
 
 ---
 
@@ -188,13 +204,15 @@ V4.1 完整源码测试、本地验收和公网验收均已通过。正式 ZIP �
 - Health：`https://handwrite-studio-api-production.up.railway.app/health`（HTTP 200，`status=ok`、`version=4.1.0`、`environment=production`）
 - Showcase：`https://handwrite-studio.pages.dev/showcase/`
 
+当前公网仍为 V4.1；V4.2 推送因外发授权未获批准而暂停，没有绕过授权发布。
+
 ---
 
 ## 当前部署状态
 
 Railway FastAPI production 后端已部署 V4.1：服务 `handwrite-studio-api`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。`ALLOWED_ORIGINS` 精确设置为 `https://handwrite-studio.pages.dev`。Render 因绑卡要求停用。
 
-Cloudflare Pages production 前端已部署 V4.1：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。当前正式运行时代码基线为提交 `1282c2f`，包含背景感知纸线槽位布局及手动可写范围校准。
+Cloudflare Pages production 前端当前仍部署 V4.1：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。V4.2 本地提交为 `3a24d79`，等待明确授权推送后由现有流水线发布。
 
 ---
 
@@ -226,6 +244,8 @@ Cloudflare Pages production 前端已部署 V4.1：项目 `handwrite-studio`，�
 - V4 修复公网 PNG：`../outputs/v4-fix-public-export-300dpi.png`
 - V4.1 背景感知公网 PDF：`output/pdf/v4.1-background-aware-public.pdf`
 - V4.1 背景感知公网 PNG：`output/png/v4.1-background-aware-public-300dpi.png`
+- V4.2 本地 300 DPI PNG：`output/png/v4.2-layout-appearance-final-300dpi.png`
+- V4.2 本地三页 PDF：`output/pdf/v4.2-layout-appearance-demo-3pages.pdf`
 
 ---
 
