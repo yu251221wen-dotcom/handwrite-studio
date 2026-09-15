@@ -14,6 +14,7 @@
 - GitHub：`https://github.com/yu251221wen-dotcom/handwrite-studio`
 - V4 实现提交：`e6926cdf07dd0116e68ee6d9c34243de65596448`
 - 横线吸附防重叠修复：`41ebf6e55ecb345c7c3b6534c51a3addff629405`
+- V4 公网背景与单调吸附修复：`e83bb92`
 
 ---
 
@@ -65,7 +66,8 @@
 - [x] 页面级横线坐标、置信度和校准状态
 - [x] 文字基线吸附与检测辅助线
 - [x] 横线行距、整体 Y 偏移、添加/删除/重置和布局建议
-- [x] 横线吸附冲突回退，禁止两行正文吸到同一纸线
+- [x] 横线吸附单调一一匹配（动态规划），禁止两行正文吸到同一纸线
+- [x] 横线匹配诊断（文字行、纸线、基线差值、重复分配数）
 - [x] character-level handwriting
 - [x] deterministic Seed
 - [x] fixed handwriting
@@ -82,6 +84,9 @@
 - [x] /health
 - [x] 公网字体/背景 HTTPS 资源链路
 - [x] 失效匿名 Session 自动刷新一次
+- [x] 公网 Session 创建与资源读取的单次瞬时失败重试
+- [x] 字体/背景资源列表独立加载，一个资源失败不再拖垮另一个页面
+- [x] 上传背景预览、检测与导出统一使用经 Session 验证的 Blob 资源
 - [x] 长段落剩余页空间利用优化
 - [x] 固定标题栏与三栏独立滚动
 - [x] Template Mapping production path removed / disabled
@@ -103,12 +108,12 @@
 
 ## 当前最高优先级
 
-当前阶段：V4.0 横线适配与字体加载收尾已完成并部署公网
+当前阶段：V4.0 修复已完成并部署公网
 
 1. Cloudflare Pages 正式前端保持可用
 2. 保持 Session isolation、精确 CORS 和 `/health`
 3. 保持 Golden Test Missing = 0
-4. 保持 `autoY + lineSnapOffset + manualOffsetY` 和 Seed 稳定性
+4. 保持 `autoY + lineSnapOffset + manualOffsetY`、单调一一匹配和 Seed 稳定性
 5. 不提前开发 OCR、透视或 AI 字形
 
 ---
@@ -121,7 +126,7 @@ V4.0 已完成。下一阶段可进入 V5 纸张倾斜和四角透视校准，�
 
 ## 最近测试结果
 
-- TypeScript：34 / 34 通过
+- TypeScript：37 / 37 通过
 - Python：16 / 16 通过
 - Typecheck：通过
 - ESLint：0 error
@@ -131,16 +136,18 @@ V4.0 已完成。下一阶段可进入 V5 纸张倾斜和四角透视校准，�
 - Golden Test：Raw 3657 / Laid out 3657 / Missing 0；实际 Canvas `fillText` 覆盖率通过
 - 公网 DOCX：合成长文档 Raw 3097 / Laid out 3097 / Missing 0，DocumentBlock 5，自动排版 7 页
 - 横线检测：标准/噪声/粗线双边缘合并单测通过；纯白背景不会误启用吸附
+- 横线匹配：动态规划保持文字顺序；纸线索引严格递增；重复分配为 0；纸线不足时仅按检测行距从边缘延伸
 - 公网横线预设：轻噪扫描横线纸识别 18 条，置信度 100%
-- 公网上传背景：合成横线纸识别 15 条，置信度 100%；上传资源按 Session 隔离
+- 公网上传背景：真实 UI 连续上传合成 PNG 与 JPG 均成功；同一 Session 列表可见两项，上传资源按 Session 隔离
+- 公网背景检测：合成横线纸识别 21 条，平均行距 37 px，置信度 100%；8 行文字按 `1→1、2→2、3→3、4→5、5→6、6→7、7→8、8→9` 匹配，所有基线差值为 -2 px，重复分配 0
 - 横线稳定性：换 Seed 不改变最终 Y；分页、背景切换和拖动不进入字符随机 key
-- 吸附冲突：不兼容行距命中同一纸线时回退冲突组的原始 `autoY`，最终 PNG/PDF 目视无文字重叠
+- 吸附防重叠：旧冲突组回退已由全局单调一一匹配替代；段间距通过跳过纸线保留，最终 PNG/PDF 无文字重叠
 - 公网自定义字体：Geist TTF 经 `FontFace.load()`、`document.fonts.load/ready/check` 和应用 Canvas 像素指纹验证成功，当前行真实选择 `Geist-Regular`
 - 公网 Session isolation：新浏览器会话未读取到另一会话上传的字体、背景或长文档状态
 - 公网 CORS：正式前端 Origin 允许，预检 200，`X-Session-ID` 已允许
 - 公网资源：TTF 与合成 PNG 上传成功；返回 URL 为直接 HTTPS；文件响应 200 且 CORS 精确匹配正式前端
-- 公网 PNG：V4 防重叠修复版实测 2480 × 3508 px（A4 300 DPI），不含红色检测辅助线
-- 公网 PDF：V4 防重叠修复版为 A4 MediaBox，程序读取页数正确；长文档链路实测导出 7 页
+- 公网 PNG：从正式 Pages UI 导出，实测 2480 × 3508 px（A4 300 DPI），不含红色检测辅助线
+- 公网 PDF：从正式 Pages UI 独立导出，程序读取为 1 页；300 DPI 回渲尺寸 2481 × 3509，与 PNG 对齐后平均像素差 0.652 / 255，无浏览器页眉、默认边距或额外页面；长文档链路另已实测导出 7 页
 - UI：桌面三栏结构保持；字体 30 资源位、背景 31 个不同预设；控制台 0 error/warning；移动端沿用 V3.1 已验收的非破版响应式结构
 - Cloudflare Pages：4 个正式路由 `/`、`/font-library/`、`/background-library/`、`/showcase/` 均为 HTTP 200
 - Clean-room：V3.0 最近一次通过；V4.0 尚未重新打包和执行 clean-room
@@ -180,13 +187,13 @@ V4.0 完整源码测试与公网验收已通过；正式 ZIP 与 clean-room 需�
 
 Railway FastAPI production 后端已部署 V4.0：服务 `handwrite-studio-api`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。`ALLOWED_ORIGINS` 精确设置为 `https://handwrite-studio.pages.dev`。Render 因绑卡要求停用。
 
-Cloudflare Pages production 前端已部署 V4.0：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。V4 运行时代码基线为提交 `41ebf6e`，对应预览部署 URL 为 `https://2dcb9e6d.handwrite-studio.pages.dev`；其后的验收文档提交不改变运行时代码。
+Cloudflare Pages production 前端已部署 V4.0：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。当前正式运行时代码基线为提交 `e83bb92`，包含公网背景资源恢复与横线单调一一匹配修复。
 
 ---
 
 ## 当前已知问题
 
-- Cloudflare / Vite 开发运行时可能在类型初始化时出现 `fetch failed` / `ECONNRESET`；production build 和本地生产预览稳定
+- Railway 冷启动或瞬时网络中断仍可能增加首次加载时间；前端会对 Session 创建和资源读取自动重试一次
 - 旧 `chatgpt.site` 在手机移动网络触发 Cloudflare block，已停止作为正式公网入口
 - Cloudflare Pages 已完成桌面浏览器及 390 × 844 移动视口验收；真实蜂窝移动网络仍需用户在手机实机打开正式域名确认
 - 旧字段布局引擎与字段映射模块仍作为迁移兼容源码保留，但没有正式运行入口
@@ -208,6 +215,8 @@ Cloudflare Pages production 前端已部署 V4.0：项目 `handwrite-studio`，�
 - Acceptance report：`../outputs/V3-final-acceptance-report-20260913.md`
 - Golden PDF：`../outputs/v3-fixed-no-template-golden.pdf`
 - Golden PNG：`../outputs/v3-fixed-golden-300dpi-page1.png`
+- V4 修复公网 PDF：`../outputs/v4-fix-public-export.pdf`
+- V4 修复公网 PNG：`../outputs/v4-fix-public-export-300dpi.png`
 
 ---
 
