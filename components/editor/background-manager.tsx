@@ -5,8 +5,8 @@ import { Check, Plus, RotateCcw, ScanLine, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api/client";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { RafSlider } from "./raf-slider";
 import { DEFAULT_LINE_DETECTION, respaceHorizontalLines } from "@/lib/background/line-detection";
 import type { LineSnapDiagnostic } from "@/lib/background/line-detection";
 import type { BackgroundAdjustments, BackgroundAsset, BackgroundTransform, HorizontalLineDetection } from "@/lib/handwriting/types";
@@ -21,7 +21,7 @@ function thumbStyle(asset: BackgroundAsset) {
 }
 
 function Adjustment({ label, value, min, max, unit, onChange }: { label: string; value: number; min: number; max: number; unit: string; onChange: (value: number) => void }) {
-  return <div className="space-y-2"><div className="flex justify-between text-xs text-slate-500"><span>{label}</span><span>{value}{unit}</span></div><Slider aria-label={label} value={[value]} min={min} max={max} onValueChange={(next) => onChange(Number(next[0]))} /></div>;
+  return <div className="space-y-2"><div className="flex justify-between text-xs text-slate-500"><span>{label}</span><span>{value}{unit}</span></div><RafSlider ariaLabel={label} value={value} min={min} max={max} onCommit={onChange} /></div>;
 }
 
 export function BackgroundManager({ backgrounds, selectedId, adjustments, transform, lineDetection, snapDiagnostics, detecting, onSelect, onAdjust, onTransform, onLineDetection, onDetectLines, onApplySuggestedLayout, onApplyToAll, onUploaded }: { backgrounds: BackgroundAsset[]; selectedId: string; adjustments: BackgroundAdjustments; transform: BackgroundTransform; lineDetection: HorizontalLineDetection; snapDiagnostics: LineSnapDiagnostic[]; detecting: boolean; onSelect: (id: string) => void; onAdjust: (value: BackgroundAdjustments) => void; onTransform: (value: BackgroundTransform) => void; onLineDetection: (value: HorizontalLineDetection) => void; onDetectLines: () => void; onApplySuggestedLayout: (fontSize: number, lineHeight: number) => void; onApplyToAll: () => void; onUploaded: (asset: BackgroundAsset) => void }) {

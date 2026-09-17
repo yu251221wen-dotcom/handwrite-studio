@@ -5,9 +5,9 @@ export const DEFAULT_INK_STYLE: InkStyle = {
   enabled: true,
   color: "#163d64",
   variation: 0.18,
-  bleed: 0.08,
-  dryBrush: 0.04,
-  brokenInk: 0.025,
+  bleed: 0,
+  dryBrush: 0,
+  brokenInk: 0,
   darknessTrend: 0.18,
 };
 

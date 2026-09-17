@@ -1,10 +1,10 @@
 "use client";
 
-import { Slider } from "@/components/ui/slider";
+import { RafSlider } from "./raf-slider";
 import type { DocumentLayoutSettings, NoTemplateMode } from "@/lib/handwriting/types";
 
 function Setting({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
-  return <div className="space-y-1.5"><div className="flex justify-between text-xs text-slate-500"><span>{label}</span><span>{value}</span></div><Slider value={[value]} min={min} max={max} onValueChange={(next) => onChange(Number(next[0]))} /></div>;
+  return <div className="space-y-1.5"><div className="flex justify-between text-xs text-slate-500"><span>{label}</span><span>{value}</span></div><RafSlider ariaLabel={label} value={value} min={min} max={max} onCommit={onChange} /></div>;
 }
 
 export function DocumentLayoutPanel({ noTemplateMode, settings, onNoTemplateMode, onSettings }: {

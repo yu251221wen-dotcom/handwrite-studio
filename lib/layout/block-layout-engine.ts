@@ -7,6 +7,7 @@ import { DEFAULT_ADJUSTMENTS, DEFAULT_TRANSFORM } from "./paginator.ts";
 import { mapSourceCharacters } from "../handwriting/source-character-map.ts";
 import { applyLineSnapping, DEFAULT_LINE_DETECTION, normalizeLineDetection } from "../background/line-detection.ts";
 import { paperSlotGap, resolveBackgroundLayoutGrid, type BackgroundLayoutGrid } from "./background-aware-layout.ts";
+import { monotonicNow, recordLayoutRecompute, recordLayoutTiming } from "../performance/performance-monitor.ts";
 
 interface BlockLayoutInput {
   documentId: string; blocks: DocumentBlock[]; measurer: TextMeasurer;
@@ -18,6 +19,18 @@ type LogicalLine = Omit<LineLayout, "pageId" | "autoY">;
 interface BlockUnit {
   block: DocumentBlock; lines: LogicalLine[]; spacingBefore: number; spacingAfter: number;
   keepWithNext: boolean; minLinesAfter: number; allowSplit: boolean;
+}
+
+export interface PaginationDiagnostic {
+  pageIndex: number; usableSlots: number; usedSlots: number; remainingSlots: number;
+  nextBlockType: DocumentBlock["type"] | null; nextBlockSplittable: boolean;
+  breakReason: "page-full" | "heading-with-next" | "atomic-signature" | "atomic-block" | "avoidable-gap" | "document-end";
+  requiredSlots: number;
+}
+
+let lastPaginationDiagnostics: PaginationDiagnostic[] = [];
+export function getLastPaginationDiagnostics(): PaginationDiagnostic[] {
+  return lastPaginationDiagnostics.map((item) => ({ ...item }));
 }
 
 const A4_WIDTH = 595;
@@ -113,7 +126,7 @@ function blockToUnit(block: DocumentBlock, input: BlockLayoutInput): BlockUnit {
   } else if (block.type === "prescription" && !simple) {
     // Clinical prescriptions default to four fixed logical anchors. Each drug +
     // dose remains one atomic cell and each row consumes exactly one paper slot.
-    const count = columnsFor(input.settings.prescriptionColumns, A4_WIDTH - input.settings.marginLeft - input.settings.marginRight, 4);
+    const count = input.settings.prescriptionColumns === "auto" ? 4 : input.settings.prescriptionColumns;
     const rows = Array.from({ length: Math.ceil(block.items.length / count) }, (_, index) => block.items.slice(index * count, (index + 1) * count).map((item) => item.raw));
     lines = structuredRows(block, rows, input, "columns");
   } else if (block.type === "signature" && !simple) {
@@ -157,6 +170,81 @@ function restoreManual(line: LogicalLine, previous: Map<string, LineLayout>): Lo
     lineHeight: old.lineHeight, fontId: old.fontId, locked: old.locked } : line;
 }
 
+function signatureGroupLineCount(units: BlockUnit[], start: number): number {
+  if (units[start]?.block.type !== "signature") return units[start]?.lines.length ?? 0;
+  let count = 0;
+  for (let index = start; index < units.length && units[index].block.type === "signature"; index += 1) count += units[index].lines.length;
+  return count;
+}
+
+function paginationDiagnostics(pages: PageState[], units: BlockUnit[], fallbackUsableSlots: number): PaginationDiagnostic[] {
+  const byBlock = new Map(units.map((unit, index) => [unit.block.blockId, { unit, index }]));
+  return pages.map((page, pageIndex) => {
+    const grid = resolveBackgroundLayoutGrid(page.lineDetection);
+    const usableSlots = grid?.usableLineCount ?? fallbackUsableSlots;
+    const assigned = page.lines.flatMap((line) => line.assignedPaperLineIndex === undefined || !grid ? [] : [line.assignedPaperLineIndex - grid.firstUsableLine + 1]);
+    const usedSlots = Math.min(usableSlots, assigned.length ? Math.max(...assigned) : page.lines.length);
+    const remainingSlots = Math.max(0, usableSlots - usedSlots);
+    const nextLine = pages[pageIndex + 1]?.lines[0];
+    const matched = nextLine ? byBlock.get(nextLine.blockId ?? nextLine.fieldId) : undefined;
+    const unit = matched?.unit;
+    const nextBlockType = unit?.block.type ?? nextLine?.blockType ?? null;
+    const nextBlockSplittable = Boolean(unit?.allowSplit && (nextBlockType === "paragraph" || nextBlockType === "list"));
+    let requiredSlots = 0;
+    if (unit) {
+      if (nextBlockType === "heading") requiredSlots = unit.lines.length + Math.max(1, unit.minLinesAfter);
+      else if (nextBlockType === "signature") requiredSlots = signatureGroupLineCount(units, matched!.index);
+      else requiredSlots = 1;
+    }
+    const breakReason: PaginationDiagnostic["breakReason"] = !nextLine ? "document-end" : remainingSlots === 0 ? "page-full" :
+      nextBlockType === "heading" ? "heading-with-next" : nextBlockType === "signature" ? "atomic-signature" :
+      !nextBlockSplittable ? "atomic-block" : "avoidable-gap";
+    return { pageIndex, usableSlots, usedSlots, remainingSlots, nextBlockType, nextBlockSplittable, breakReason, requiredSlots };
+  });
+}
+
+function compactPaperPages(pages: PageState[], units: BlockUnit[]): PageState[] {
+  const byBlock = new Map(units.map((unit) => [unit.block.blockId, unit]));
+  const compacted = pages.map((page) => ({ ...page, blockIds: [...(page.blockIds ?? [])], lines: [...page.lines] }));
+  for (let pageIndex = 0; pageIndex < compacted.length - 1; pageIndex += 1) {
+    const page = compacted[pageIndex];
+    const grid = resolveBackgroundLayoutGrid(page.lineDetection);
+    if (!grid) continue;
+    let usedSlots = page.lines.reduce((maximum, line) => Math.max(maximum,
+      line.assignedPaperLineIndex === undefined ? 0 : line.assignedPaperLineIndex - grid.firstUsableLine + 1), 0);
+    while (usedSlots < grid.usableLineCount && compacted[pageIndex + 1]?.lines.length) {
+      const nextPage = compacted[pageIndex + 1];
+      const first = nextPage.lines[0];
+      const unit = byBlock.get(first.blockId ?? first.fieldId);
+      if (!unit?.allowSplit || (unit.block.type !== "paragraph" && unit.block.type !== "list")) break;
+      nextPage.lines.shift();
+      const paperLineIndex = grid.firstUsableLine + usedSlots;
+      const paperLineY = grid.detection.lineY[paperLineIndex];
+      page.lines.push({ ...first, pageId: page.pageId, autoY: paperLineY + grid.detection.offsetY,
+        lineSnapOffset: 0, assignedPaperLineY: paperLineY, assignedPaperLineIndex: paperLineIndex });
+      if (!page.blockIds!.includes(unit.block.blockId)) page.blockIds!.push(unit.block.blockId);
+      usedSlots += 1;
+      const nextGrid = resolveBackgroundLayoutGrid(nextPage.lineDetection);
+      if (nextGrid) {
+        nextPage.lines = nextPage.lines.map((line) => {
+          if (line.assignedPaperLineIndex === undefined) return line;
+          const shiftedIndex = Math.max(nextGrid.firstUsableLine, line.assignedPaperLineIndex - 1);
+          const shiftedY = nextGrid.detection.lineY[shiftedIndex];
+          return { ...line, autoY: shiftedY + nextGrid.detection.offsetY, lineSnapOffset: 0,
+            assignedPaperLineY: shiftedY, assignedPaperLineIndex: shiftedIndex };
+        });
+      }
+      if (!nextPage.lines.length) compacted.splice(pageIndex + 1, 1);
+    }
+  }
+  return compacted.map((page, pageIndex) => ({
+    ...page,
+    pageIndex,
+    pageType: pageIndex === 0 ? "first" : page.pageType === "blank" || page.pageType === "custom" ? page.pageType : "continuation",
+    blockIds: [...new Set(page.lines.map((line) => line.blockId ?? line.fieldId))],
+  }));
+}
+
 function paginateOnPaperLines(
   input: BlockLayoutInput,
   units: BlockUnit[],
@@ -193,8 +281,9 @@ function paginateOnPaperLines(
   page = makePage();
   const nextPage = () => { page = makePage(); };
 
-  const paperGapBefore = (unit: BlockUnit) => {
+  const paperGapBefore = (unit: BlockUnit, previous?: BlockUnit) => {
     if (slot === 0) return 0;
+    if (unit.block.type === "signature" && previous?.block.type === "signature") return 0;
     if (unit.block.type === "heading" || unit.block.type === "signature") {
       return Math.min(1, paperSlotGap(unit.spacingBefore, grid.averageSpacing));
     }
@@ -207,12 +296,15 @@ function paginateOnPaperLines(
     const nextUnit = units[unitIndex + 1];
     // On ruled paper a paragraph/list/diagnosis boundary is not a blank-line
     // instruction. Only a heading/signature may consume one structural slot.
-    let gapBefore = paperGapBefore(unit);
-    const availableLines = grid.usableLineCount - slot - gapBefore;
-    const requiredWithNext = unit.keepWithNext ? unit.lines.length + Math.min(unit.minLinesAfter, nextUnit?.lines.length ?? 0) : 0;
+    let gapBefore = paperGapBefore(unit, units[unitIndex - 1]);
+    const rawAvailableLines = grid.usableLineCount - slot;
+    const requiredWithNext = unit.keepWithNext ? unit.lines.length + Math.min(Math.max(1, unit.minLinesAfter), nextUnit?.lines.length ?? 0) : 0;
+    const atomicLines = unit.block.type === "signature" ? signatureGroupLineCount(units, unitIndex) : unit.lines.length;
+    const minimumRequired = requiredWithNext || (!unit.allowSplit ? atomicLines : 1);
+    if (gapBefore > 0 && rawAvailableLines >= minimumRequired && rawAvailableLines - gapBefore < minimumRequired) gapBefore = 0;
+    const availableLines = rawAvailableLines - gapBefore;
     if ((requiredWithNext > 0 && requiredWithNext <= grid.usableLineCount && availableLines < requiredWithNext) ||
-        (!unit.allowSplit && unit.lines.length <= grid.usableLineCount && availableLines < unit.lines.length) ||
-        (availableLines > 0 && availableLines < input.settings.minLinesAtPageBottom && unit.lines.length > availableLines)) {
+        (!unit.allowSplit && atomicLines <= grid.usableLineCount && availableLines < atomicLines)) {
       nextPage();
       gapBefore = 0;
     }
@@ -224,14 +316,10 @@ function paginateOnPaperLines(
       if (fitCount === 0) { nextPage(); continue; }
 
       const remaining = unit.lines.length - lineIndex;
-      let take = Math.min(fitCount, remaining);
+      const take = Math.min(fitCount, remaining);
       if (remaining > take) {
         const canSplit = unit.allowSplit || unit.lines.length > grid.usableLineCount;
         if (!canSplit) { nextPage(); continue; }
-        const minNext = Math.min(input.settings.minLinesAtPageTop, remaining - 1);
-        take = Math.min(take, remaining - minNext);
-        const minCurrent = Math.min(input.settings.minLinesAtPageBottom, remaining - minNext);
-        if (take < minCurrent && slot > 0) { nextPage(); continue; }
       }
 
       for (let offset = 0; offset < take; offset += 1) {
@@ -265,6 +353,7 @@ function paginateOnPaperLines(
 }
 
 export function layoutDocumentBlocks(input: BlockLayoutInput): { pages: PageState[]; lines: LineLayout[] } {
+  recordLayoutRecompute();
   const previousLines = new Map(input.previousPages?.flatMap((page) => page.lines.map((line) => [line.id, line] as const)) ?? []);
   const previousAutoPages = (input.previousPages ?? []).filter((page) => page.pageType !== "blank" && page.pageType !== "custom");
   const trailingManualPages = (input.previousPages ?? []).filter((page) => page.pageType === "blank" || page.pageType === "custom");
@@ -279,8 +368,21 @@ export function layoutDocumentBlocks(input: BlockLayoutInput): { pages: PageStat
       lineHeight: masterGrid.averageSpacing,
     },
   } : input;
+  const wrapStarted = monotonicNow();
   const units = layoutInput.blocks.map((block) => blockToUnit(block, layoutInput));
-  if (masterGrid) return paginateOnPaperLines(layoutInput, units, previousLines, previousAutoPages, trailingManualPages, masterGrid, masterPage);
+  recordLayoutTiming("wrap", monotonicNow() - wrapStarted);
+  if (masterGrid) {
+    const paginationStarted = monotonicNow();
+    const result = paginateOnPaperLines(layoutInput, units, previousLines, previousAutoPages, trailingManualPages, masterGrid, masterPage);
+    const compactedPages = compactPaperPages(result.pages, units);
+    const paginationMs = monotonicNow() - paginationStarted;
+    recordLayoutTiming("pagination", paginationMs);
+    recordLayoutTiming("slot-assignment", paginationMs);
+    lastPaginationDiagnostics = paginationDiagnostics(compactedPages, units, masterGrid.usableLineCount);
+    if (process.env.NODE_ENV === "development") console.debug("[V4.2.1 pagination]", lastPaginationDiagnostics);
+    return { pages: compactedPages, lines: compactedPages.flatMap((item) => item.lines) };
+  }
+  const paginationStarted = monotonicNow();
   const pages: PageState[] = [];
   const top = layoutInput.settings.marginTop;
   const bottom = A4_HEIGHT - layoutInput.settings.marginBottom;
@@ -307,11 +409,16 @@ export function layoutDocumentBlocks(input: BlockLayoutInput): { pages: PageStat
     const unit = units[unitIndex];
     if (!unit.lines.length) continue;
     const nextUnit = units[unitIndex + 1];
-    const availableLines = Math.floor((bottom - y - unit.spacingBefore) / Math.max(1, unit.lines[0].lineHeight));
-    const requiredWithNext = unit.keepWithNext ? unit.lines.length + Math.min(unit.minLinesAfter, nextUnit?.lines.length ?? 0) : 0;
-    if ((requiredWithNext && availableLines < requiredWithNext) || (!unit.allowSplit && availableLines < unit.lines.length) ||
-        (availableLines > 0 && availableLines < layoutInput.settings.minLinesAtPageBottom && unit.lines.length > availableLines)) nextPage();
-    y += unit.spacingBefore;
+    let spacingBefore = unit.block.type === "signature" && units[unitIndex - 1]?.block.type === "signature" ? 0 : unit.spacingBefore;
+    const rawAvailableLines = Math.floor((bottom - y) / Math.max(1, unit.lines[0].lineHeight));
+    const requiredWithNext = unit.keepWithNext ? unit.lines.length + Math.min(Math.max(1, unit.minLinesAfter), nextUnit?.lines.length ?? 0) : 0;
+    const atomicLines = unit.block.type === "signature" ? signatureGroupLineCount(units, unitIndex) : unit.lines.length;
+    const requiredLines = requiredWithNext || (!unit.allowSplit ? atomicLines : 1);
+    const preferredAvailableLines = Math.floor((bottom - y - spacingBefore) / Math.max(1, unit.lines[0].lineHeight));
+    if (spacingBefore > 0 && rawAvailableLines >= requiredLines && preferredAvailableLines < requiredLines) spacingBefore = 0;
+    const availableLines = Math.floor((bottom - y - spacingBefore) / Math.max(1, unit.lines[0].lineHeight));
+    if ((requiredWithNext && availableLines < requiredWithNext) || (!unit.allowSplit && availableLines < atomicLines)) nextPage();
+    y += y === top ? 0 : spacingBefore;
     const fullUnitHeight = unit.lines.reduce((sum, line) => sum + restoreManual(line, previousLines).lineHeight, 0);
     let lineIndex = 0;
     while (lineIndex < unit.lines.length) {
@@ -332,17 +439,13 @@ export function layoutDocumentBlocks(input: BlockLayoutInput): { pages: PageStat
       }
 
       const remaining = unit.lines.length - lineIndex;
-      let take = Math.min(fitCount, remaining);
+      const take = Math.min(fitCount, remaining);
       if (remaining > take) {
         const canSplit = unit.allowSplit || fullUnitHeight > bottom - top;
         if (!canSplit) { nextPage(); continue; }
 
-        // Keep a small continuation at the top of the following page, but consume
-        // the current page instead of moving the entire long paragraph forward.
-        const minNext = Math.min(layoutInput.settings.minLinesAtPageTop, remaining - 1);
-        take = Math.min(take, remaining - minNext);
-        const minCurrent = Math.min(layoutInput.settings.minLinesAtPageBottom, remaining - minNext);
-        if (take < minCurrent && y > top) { nextPage(); continue; }
+        // Splittable prose consumes every available row; widow control is reserved
+        // for headings through keepWithNext, never for ordinary paragraphs/lists.
       }
 
       for (let offset = 0; offset < take; offset += 1) {
@@ -363,5 +466,11 @@ export function layoutDocumentBlocks(input: BlockLayoutInput): { pages: PageStat
       lines: manual.lines.map((line) => ({ ...line, pageId: manual.pageId || `page-${pageIndex + 1}` })) });
   }
   const snappedPages = pages.map((item) => applyLineSnapping(item, normalizeLineDetection(item.lineDetection)));
+  const paginationMs = monotonicNow() - paginationStarted;
+  recordLayoutTiming("pagination", paginationMs);
+  recordLayoutTiming("slot-assignment", 0);
+  lastPaginationDiagnostics = paginationDiagnostics(snappedPages, units,
+    Math.max(1, Math.floor((bottom - top) / Math.max(1, layoutInput.settings.lineHeight))));
+  if (process.env.NODE_ENV === "development") console.debug("[V4.2.1 pagination]", lastPaginationDiagnostics);
   return { pages: snappedPages, lines: snappedPages.flatMap((item) => item.lines) };
 }

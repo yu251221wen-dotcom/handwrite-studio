@@ -8,6 +8,7 @@ import { DocumentLayoutPanel } from "./document-layout-panel";
 import { FontManager } from "./font-manager";
 import { HandwritingCanvas } from "./handwriting-canvas";
 import { PageManager } from "./page-manager";
+import { RafSlider } from "./raf-slider";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Slider } from "@/components/ui/slider";
@@ -30,6 +31,7 @@ import { validateDocumentCoverage } from "@/lib/layout/coverage";
 import { applyFontToPages, layoutProjectPages } from "@/lib/layout/project-layout";
 import { createApproximateTextMeasurer, createCanvasTextMeasurer } from "@/lib/layout/text-measure";
 import { addBlankPage, deletePageContent, duplicatePage, inspectPageDeletion, movePage } from "@/lib/pages/page-manager";
+import { recordComponentRender, recordInteraction } from "@/lib/performance/performance-monitor";
 
 function demoBlocks(fields: FieldMapping[]): { blocks: DocumentBlock[]; fields: FieldMapping[] } {
   const patient = fields.filter((field) => field.role === "patient");
@@ -49,7 +51,7 @@ function makeProject(fields = DEMO_INITIAL_FIELDS, name = DEMO_DOCUMENT_NAME, ra
   const font = FONT_SLOTS.find((item) => item.id === fontId) ?? FONT_SLOTS[0];
   const demo = demoBlocks(fields); const documentId = documentFingerprint(demo.fields);
   const base: ProjectState = {
-    schemaVersion: 3, projectVersion: "4.2.0", id: previous?.id ?? "current",
+    schemaVersion: 3, projectVersion: "4.2.1", id: previous?.id ?? "current",
     document: { id: documentId, name, rawTexts, sourceCharacterCount: fields.reduce((sum, field) => sum + Array.from(field.value).length, 0) },
     layoutMode: "no-template", noTemplateMode: previous?.noTemplateMode ?? "preserve-structure",
     templateId: null, documentBlocks: demo.blocks,
@@ -64,8 +66,8 @@ function makeProject(fields = DEMO_INITIAL_FIELDS, name = DEMO_DOCUMENT_NAME, ra
   return { ...base, pages: layoutProjectPages(base, createApproximateTextMeasurer(), font) };
 }
 
-function RangeRow({ label, value, display, min, max, step = 1, disabled, onChange }: { label: string; value: number; display: string; min: number; max: number; step?: number; disabled?: boolean; onChange: (value: number) => void }) {
-  return <div className="space-y-2"><div className="flex justify-between text-sm"><span className="text-slate-700">{label}</span><span className="tabular-nums text-slate-400">{display}</span></div><Slider disabled={disabled} value={[value]} min={min} max={max} step={step} onValueChange={(next) => onChange(Number(next[0]))} /></div>;
+function RangeRow({ label, value, display, min, max, step = 1, disabled, onChange, onPreview, onCommit }: { label: string; value: number; display: string; min: number; max: number; step?: number; disabled?: boolean; onChange?: (value: number) => void; onPreview?: (value: number) => void; onCommit?: () => void }) {
+  return <div className="space-y-2"><div className="flex justify-between text-sm"><span className="text-slate-700">{label}</span><span className="tabular-nums text-slate-400">{display}</span></div><RafSlider ariaLabel={label} disabled={disabled} value={value} min={min} max={max} step={step} onPreview={onPreview} onCommit={(next) => { onChange?.(next); onCommit?.(); }} /></div>;
 }
 
 function rawTextsFromDocument(document: { blocks?: DocumentBlock[] }) {
@@ -82,6 +84,7 @@ async function loadExportBackground(asset: BackgroundAsset) {
 }
 
 export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "document" | "font" | "background" }) {
+  useEffect(() => { recordComponentRender("EditorWorkspace"); });
   const [history, setHistory] = useState(() => createHistory(makeProject()));
   const project = history.present;
   const [fonts, setFonts] = useState<FontAsset[]>(FONT_SLOTS);
@@ -105,13 +108,14 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   const [autosaveReady, setAutosaveReady] = useState(false);
   const projectInput = useRef<HTMLInputElement>(null);
   const dragBaseline = useRef<ProjectState | null>(null);
+  const controlBaseline = useRef<ProjectState | null>(null);
 
   const allLines = project.pages.flatMap((page) => page.lines);
   const selected = allLines.find((line) => line.id === selectedId) ?? allLines[0];
   const currentPage = (project.pages.find((page) => page.pageId === currentPageId) ?? project.pages[0])!;
   const currentBackground = backgrounds.find((item) => item.id === currentPage.backgroundId) ?? backgrounds[0];
-  const inkStyle = normalizeInkStyle(project.inkStyle, project.handwriting.inkColor);
-  const correctionStyle = normalizeCorrectionStyle(project.correctionStyle);
+  const inkStyle = useMemo(() => normalizeInkStyle(project.inkStyle, project.handwriting.inkColor), [project.inkStyle, project.handwriting.inkColor]);
+  const correctionStyle = useMemo(() => normalizeCorrectionStyle(project.correctionStyle), [project.correctionStyle]);
   const currentSnapDiagnostics = useMemo(() => lineSnapDiagnostics(currentPage), [currentPage]);
   const activeFontId = selected?.fontId ?? project.selectedFontId;
   const font = fonts.find((item) => item.id === activeFontId) ?? fonts[0];
@@ -159,6 +163,16 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
 
   const commit = (next: ProjectState) => { setSaveStatus("未保存"); setHistory((state) => commitHistory(state, { ...next, updatedAt: new Date().toISOString() })); };
   const change = (mutator: (state: ProjectState) => ProjectState) => commit(mutator(project));
+  const previewControl = (mutator: (state: ProjectState) => ProjectState) => {
+    if (!controlBaseline.current) controlBaseline.current = history.present;
+    setSaveStatus("未保存");
+    setHistory((state) => replacePresent(state, { ...mutator(state.present), updatedAt: new Date().toISOString() }));
+  };
+  const commitControl = () => {
+    const before = controlBaseline.current;
+    controlBaseline.current = null;
+    if (before) setHistory((state) => commitGesture(state, before, state.present));
+  };
   const relayout = (fields: FieldMapping[] = project.fieldMappings, base = project, nextFontId = base.selectedFontId, fontOverride?: FontAsset) => {
     const nextFont = fontOverride ?? fonts.find((item) => item.id === nextFontId) ?? FONT_SLOTS[0];
     const canvas = document.createElement("canvas"); const context = canvas.getContext("2d");
@@ -191,7 +205,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
     if (!selected) return;
     change((state) => ({ ...state, pages: state.pages.map((page) => ({ ...page, lines: page.lines.map((line) => line.id === selected.id ? { ...line, ...patch } : line) })) }));
   };
-  const selectLine = (id: string) => { setSelectedId(id); const page = project.pages.find((item) => item.lines.some((line) => line.id === id)); if (page) setCurrentPageId(page.pageId); };
+  const selectLine = (id: string) => { recordInteraction("select-line"); setSelectedId(id); const page = project.pages.find((item) => item.lines.some((line) => line.id === id)); if (page) setCurrentPageId(page.pageId); };
   const onDragLines = (pageId: string, lines: typeof currentPage.lines, phase: "preview" | "commit") => {
     if (phase === "preview") {
       if (!dragBaseline.current) dragBaseline.current = history.present;
@@ -211,6 +225,11 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   const choosePreset = (preset: HandwritingPreset) => setHandwriting({ preset, naturality: PRESET_NATURALITY[preset] });
   const setInkStyle = (patch: Partial<InkStyle>) => change((state) => ({ ...state, inkStyle: { ...normalizeInkStyle(state.inkStyle, state.handwriting.inkColor), ...patch },
     handwriting: patch.color ? { ...state.handwriting, inkColor: patch.color } : state.handwriting }));
+  const previewInkStyle = (patch: Partial<InkStyle>) => {
+    recordInteraction("ink-style-preview");
+    previewControl((state) => ({ ...state, inkStyle: { ...normalizeInkStyle(state.inkStyle, state.handwriting.inkColor), ...patch },
+      handwriting: patch.color ? { ...state.handwriting, inkColor: patch.color } : state.handwriting }));
+  };
   const setCorrectionStyle = (patch: Partial<CorrectionStyle>) => change((state) => ({ ...state, correctionStyle: { ...normalizeCorrectionStyle(state.correctionStyle), ...patch } }));
   const addCorrection = () => {
     if (!selected || !correctionTarget.trim()) { setResourceError("请先输入当前行中需要涂改的原文"); return; }
@@ -303,6 +322,21 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
       change((state) => ({ ...state, pages: state.pages.map((page) => page.pageId === currentPage.pageId ? applyLineSnapping(page, normalized) : page) }));
       return;
     }
+    const currentDetection = normalizeLineDetection(currentPage.lineDetection);
+    const layoutChanged = currentDetection.enabled !== normalized.enabled || currentDetection.snapEnabled !== normalized.snapEnabled ||
+      currentDetection.averageSpacing !== normalized.averageSpacing || currentDetection.firstUsableLine !== normalized.firstUsableLine ||
+      currentDetection.lastUsableLine !== normalized.lastUsableLine || currentDetection.writableLeft !== normalized.writableLeft ||
+      currentDetection.writableRight !== normalized.writableRight || currentDetection.lineY.join(",") !== normalized.lineY.join(",");
+    if (!layoutChanged) {
+      const offsetChanged = normalized.offsetY !== currentDetection.offsetY;
+      recordInteraction(normalized.showLines !== currentDetection.showLines ? "toggle-line-guides" : "paper-offset-preview");
+      change((state) => ({ ...state, pages: state.pages.map((page) => page.pageType === "blank" || page.pageType === "custom" ? page : {
+        ...page, lineDetection: normalized, lines: !offsetChanged ? page.lines : page.lines.map((line) => line.assignedPaperLineY === undefined ? line : {
+          ...line, autoY: line.assignedPaperLineY + normalized.offsetY, lineSnapOffset: 0,
+        }),
+      }) }));
+      return;
+    }
     const base = { ...project, pages: project.pages.map((page) => page.pageType === "blank" || page.pageType === "custom" ? page : { ...page, lineDetection: normalized }) };
     commitBackgroundRelayout(base);
   };
@@ -341,7 +375,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
       }
       const success = result.lineY.length >= 3 && result.confidence >= 0.35;
       const next = normalizeLineDetection({ ...DEFAULT_LINE_DETECTION, enabled: success, snapEnabled: success,
-        showLines: success, source: background.kind === "preset" ? "preset" : "detected", ...result });
+        showLines: false, source: background.kind === "preset" ? "preset" : "detected", ...result });
       if (success) {
         const detectedLineHeight = Math.max(28, Math.min(72, Math.round(result.averageSpacing)));
         const prepared: ProjectState = {
@@ -387,7 +421,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   };
   return <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f6f8] text-slate-900">
     <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white/95 px-2 backdrop-blur sm:px-7">
-      <div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#153f49] text-white"><FileText className="size-4.5" /></div><div className="hidden min-w-0 sm:block"><div className="flex items-center gap-2"><h1 className="text-[15px] font-semibold">墨迹排版台 V4.2</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost") ? "本地隐私模式" : "在线临时会话"}</span></div><p className="max-w-96 truncate text-xs text-slate-400">{project.document.name} · {project.pages.length} 页 · {project.noTemplateMode === "preserve-structure" ? "保留结构" : "简化正文"} · Seed {project.seed} · {saveStatus}</p></div></div>
+      <div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#153f49] text-white"><FileText className="size-4.5" /></div><div className="hidden min-w-0 sm:block"><div className="flex items-center gap-2"><h1 className="text-[15px] font-semibold">墨迹排版台 V4.2.1</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost") ? "本地隐私模式" : "在线临时会话"}</span></div><p className="max-w-96 truncate text-xs text-slate-400">{project.document.name} · {project.pages.length} 页 · {project.noTemplateMode === "preserve-structure" ? "保留结构" : "简化正文"} · Seed {project.seed} · {saveStatus}</p></div></div>
       <div className="flex items-center gap-1.5"><label aria-label="导入 DOCX" className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 xl:hidden"><Upload className="size-4" /><input className="sr-only" type="file" accept=".docx" onChange={uploadDocx} /></label><select aria-label="导出格式" className="h-8 rounded-md border border-slate-200 bg-white px-1 text-[11px] xl:hidden" value={project.exportSettings.format} onChange={(event) => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, format: event.target.value as "png" | "jpg" | "pdf" } }))}><option value="png">PNG</option><option value="jpg">JPG</option><option value="pdf">PDF</option></select><Button className="xl:hidden" variant="ghost" size="icon-sm" disabled={project.handwriting.fixed} onClick={() => change((state) => ({ ...state, seed: nextSeed(state.seed) }))} aria-label="换一种笔迹"><RefreshCw /></Button><Button variant="ghost" size="icon-sm" disabled={!history.past.length} onClick={() => setHistory(undoHistory)} aria-label="撤销"><Undo2 /></Button><Button variant="ghost" size="icon-sm" disabled={!history.future.length} onClick={() => setHistory(redoHistory)} aria-label="重做"><Redo2 /></Button><Button variant="outline" className="hidden rounded-lg md:inline-flex" onClick={saveProject}><Save />保存项目</Button><Button className="rounded-lg bg-[#d96945] text-white hover:bg-[#bf5737]" onClick={exportDocument}><Download />导出 {project.exportSettings.format.toUpperCase()}</Button></div>
     </header>
 
@@ -410,7 +444,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
         <TabsContent value="background" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<BackgroundManager backgrounds={backgrounds} selectedId={currentPage.backgroundId} adjustments={currentPage.backgroundAdjustments} transform={currentPage.backgroundTransform} lineDetection={normalizeLineDetection(currentPage.lineDetection)} snapDiagnostics={currentSnapDiagnostics} detecting={detectingLines} onSelect={selectBackground} onAdjust={(backgroundAdjustments) => updateCurrentPage({ backgroundAdjustments })} onTransform={(backgroundTransform) => updateCurrentPage({ backgroundTransform })} onLineDetection={updateLineDetection} onDetectLines={() => void detectCurrentBackgroundLines()} onApplySuggestedLayout={(bodyFontSize, lineHeight) => setLayoutSettings({ ...project.documentLayoutSettings, bodyFontSize, lineHeight })} onApplyToAll={applyCurrentPaperLayoutToAll} onUploaded={(asset) => { setBackgrounds((items) => [asset, ...items.filter((item) => item.id !== asset.id)]); selectBackground(asset.id); }} /></TabsContent>
       </Tabs></aside>
 
-      <section className="flex min-h-0 flex-col overflow-hidden bg-[#e7ecef]"><div className="sticky top-0 z-10 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white/80 px-5 text-xs text-slate-500"><span className="flex items-center gap-2"><Grid3X3 className="size-4" />多页 Canvas · 当前第 {currentPage.pageIndex + 1} 页</span><span className="flex items-center gap-2"><Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.max(0.5, value - 0.08))}><Minus /></Button>{Math.round(zoom * 100)}%<Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.min(1.2, value + 0.08))}><Plus /></Button></span></div><div className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center gap-12 overflow-auto p-8 sm:p-12">{project.pages.map((page) => <div key={page.pageId} className="space-y-3"><div className="text-center text-xs text-slate-500">第 {page.pageIndex + 1} 页 · {page.pageType ?? "continuation"}</div><HandwritingCanvas options={optionsFor(page.pageId, true)} zoom={zoom} active={page.pageId === currentPage.pageId} onActivate={() => setCurrentPageId(page.pageId)} onSelectLine={selectLine} onChangeLines={(lines, phase) => onDragLines(page.pageId, lines, phase)} onRenderError={setResourceError} /></div>)}</div></section>
+      <section className="flex min-h-0 flex-col overflow-hidden bg-[#e7ecef]"><div className="sticky top-0 z-10 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white/80 px-5 text-xs text-slate-500"><span className="flex items-center gap-2"><Grid3X3 className="size-4" />多页 Canvas · 当前第 {currentPage.pageIndex + 1} 页</span><span className="flex items-center gap-2"><Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.max(0.5, value - 0.08))}><Minus /></Button>{Math.round(zoom * 100)}%<Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.min(1.2, value + 0.08))}><Plus /></Button></span></div><div className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center gap-8 overflow-auto p-8 sm:p-12">{project.pages.map((page, pageIndex) => Math.abs(pageIndex - currentPage.pageIndex) <= 1 ? <HandwritingCanvas key={page.pageId} options={optionsFor(page.pageId, true)} zoom={zoom} active={page.pageId === currentPage.pageId} onActivate={() => setCurrentPageId(page.pageId)} onSelectLine={selectLine} onChangeLines={(lines, phase) => onDragLines(page.pageId, lines, phase)} onRenderError={setResourceError} /> : <button key={page.pageId} aria-label={`载入第 ${page.pageIndex + 1} 页`} onClick={() => setCurrentPageId(page.pageId)} className="shrink-0 bg-white shadow-[0_12px_44px_rgb(27_50_56/12%)]" style={{ width: PAGE_WIDTH * zoom, height: PAGE_HEIGHT * zoom }} />)}</div></section>
 
       <aside className="min-h-0 overflow-y-auto border-l border-slate-200 bg-white px-5 py-5 max-xl:hidden">{selected ? <>
         <div className="mb-5 flex items-center justify-between"><div><h2 className="text-sm font-semibold">当前行参数</h2><p className="mt-0.5 text-xs text-slate-400">自动坐标 + 手动偏移 · 字符状态稳定</p></div><Switch checked={selected.locked} onCheckedChange={(locked) => updateLine({ locked })} aria-label="锁定当前行" /></div>
@@ -425,10 +459,10 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
         ] as const).map(([key, label, max]) => <RangeRow disabled={project.handwriting.fixed} key={key} label={label} value={project.handwriting.randomization[key] * 100} display={`${(project.handwriting.randomization[key] * 100).toFixed(1)}%`} min={0} max={max} step={0.1} onChange={(value) => updateRandomization(key, value / 100)} />)}</CollapsibleContent></Collapsible>
         <Collapsible open={appearanceOpen} onOpenChange={setAppearanceOpen} className="mt-4 border-t border-slate-100 pt-4"><CollapsibleTrigger className="flex w-full items-center justify-between py-2 text-sm font-semibold">墨迹效果 <ChevronDown className={`size-4 transition ${appearanceOpen ? "rotate-180" : ""}`} /></CollapsibleTrigger><CollapsibleContent className="space-y-4 pt-3">
           <div className="space-y-2"><span className="text-sm text-slate-700">墨水颜色</span><div className="flex items-center gap-2">{["#142f4f", "#163d64", "#20558a", "#17191c"].map((color) => <button key={color} aria-label={`墨色 ${color}`} onClick={() => setInkStyle({ color })} className={`size-7 rounded-full border-2 ${inkStyle.color === color ? "border-[#d96945]" : "border-white ring-1 ring-slate-200"}`} style={{ backgroundColor: color }} />)}<input aria-label="自定义墨色" type="color" value={inkStyle.color} onChange={(event) => setInkStyle({ color: event.target.value })} className="h-7 w-9 cursor-pointer rounded border border-slate-200 bg-white p-0.5" /></div></div>
-          <RangeRow label="墨色波动" value={inkStyle.variation * 100} display={`${Math.round(inkStyle.variation * 100)}%`} min={0} max={50} onChange={(value) => setInkStyle({ variation: value / 100 })} />
-          <RangeRow label="轻微洇墨" value={inkStyle.bleed * 100} display={`${Math.round(inkStyle.bleed * 100)}%`} min={0} max={45} onChange={(value) => setInkStyle({ bleed: value / 100 })} />
-          <RangeRow label="飞白" value={inkStyle.dryBrush * 100} display={`${Math.round(inkStyle.dryBrush * 100)}%`} min={0} max={20} onChange={(value) => setInkStyle({ dryBrush: value / 100 })} />
-          <RangeRow label="断墨" value={inkStyle.brokenInk * 100} display={`${Math.round(inkStyle.brokenInk * 100)}%`} min={0} max={12} onChange={(value) => setInkStyle({ brokenInk: value / 100 })} />
+          <RangeRow label="墨色波动" value={inkStyle.variation * 100} display={`${Math.round(inkStyle.variation * 100)}%`} min={0} max={50} onPreview={(value) => previewInkStyle({ variation: value / 100 })} onCommit={commitControl} />
+          <RangeRow label="轻微洇墨" value={inkStyle.bleed * 100} display={`${Math.round(inkStyle.bleed * 100)}%`} min={0} max={45} onPreview={(value) => previewInkStyle({ bleed: value / 100 })} onCommit={commitControl} />
+          <RangeRow label="飞白" value={inkStyle.dryBrush * 100} display={`${Math.round(inkStyle.dryBrush * 100)}%`} min={0} max={20} onPreview={(value) => previewInkStyle({ dryBrush: value / 100 })} onCommit={commitControl} />
+          <RangeRow label="断墨" value={inkStyle.brokenInk * 100} display={`${Math.round(inkStyle.brokenInk * 100)}%`} min={0} max={12} onPreview={(value) => previewInkStyle({ brokenInk: value / 100 })} onCommit={commitControl} />
           <Button size="sm" variant="outline" className="w-full" onClick={() => setInkStyle({ ...DEFAULT_INK_STYLE })}>恢复自然墨迹</Button>
         </CollapsibleContent></Collapsible>
         <Collapsible open={correctionOpen} onOpenChange={setCorrectionOpen} className="mt-4 border-t border-slate-100 pt-4"><CollapsibleTrigger className="flex w-full items-center justify-between py-2 text-sm font-semibold">涂改与补写 <ChevronDown className={`size-4 transition ${correctionOpen ? "rotate-180" : ""}`} /></CollapsibleTrigger><CollapsibleContent className="space-y-3 pt-3">

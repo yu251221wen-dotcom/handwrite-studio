@@ -23,6 +23,7 @@ export const FONT_PREVIEW_LINES = ["春风又绿江南岸", "患者因腹痛三�
 
 const fontLoads = new Map<string, Promise<void>>();
 const loadedFonts = new Set<string>();
+const fontBatchLoads = new Map<string, Promise<void>>();
 
 function fontKey(asset: FontAsset): string {
   return `${asset.id}|${asset.family}|${asset.fileUrl ?? ""}`;
@@ -90,8 +91,19 @@ export async function loadUploadedFont(asset: FontAsset): Promise<void> {
 
 export async function ensureFontsReady(assets: FontAsset[]): Promise<void> {
   const uploaded = [...new Map(assets.filter((asset) => asset.kind === "uploaded").map((asset) => [asset.id, asset])).values()];
-  await Promise.all(uploaded.map(loadUploadedFont));
-  if (typeof document !== "undefined" && document.fonts) await document.fonts.ready;
+  if (!uploaded.length) return;
+  const batchKey = uploaded.map(fontKey).sort().join("||");
+  const cached = fontBatchLoads.get(batchKey);
+  if (cached) return cached;
+  const task = (async () => {
+    await Promise.all(uploaded.map(loadUploadedFont));
+    if (typeof document !== "undefined" && document.fonts) await document.fonts.ready;
+  })().catch((error) => {
+    fontBatchLoads.delete(batchKey);
+    throw error;
+  });
+  fontBatchLoads.set(batchKey, task);
+  return task;
 }
 
 export function assertFontReady(asset: FontAsset): void {

@@ -9,6 +9,19 @@ export function normalizeCorrectionStyle(style?: Partial<CorrectionStyle>): Corr
   return { ...DEFAULT_CORRECTION_STYLE, ...style, marks: style?.marks ?? [] };
 }
 
+const correctionIndexCache = new WeakMap<CorrectionMark[], Map<string, CorrectionMark[]>>();
+
+/** Index manual marks once per immutable marks array instead of scanning every mark for every glyph line. */
+export function correctionMarksByBlock(style?: Partial<CorrectionStyle>): Map<string, CorrectionMark[]> {
+  const marks = style?.marks ?? [];
+  const cached = correctionIndexCache.get(marks);
+  if (cached) return cached;
+  const index = new Map<string, CorrectionMark[]>();
+  for (const mark of marks) index.set(mark.blockId, [...(index.get(mark.blockId) ?? []), mark]);
+  correctionIndexCache.set(marks, index);
+  return index;
+}
+
 const unsafeText = /\d|姓名|性别|年龄|日期|时间|病案号|诊断|处方|医师|老师|签名|mg|ml|\bg\b/iu;
 
 /** Conservative, deterministic auto-corrections: narrative prose only, never clinical identifiers/results. */

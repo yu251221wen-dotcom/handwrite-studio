@@ -8,6 +8,7 @@ import { DEFAULT_RANDOMIZATION } from "../lib/handwriting/randomization.ts";
 import { DEFAULT_DOCUMENT_LAYOUT_SETTINGS, type DocumentBlock, type ProjectState } from "../lib/handwriting/types.ts";
 import { validateDocumentCoverage } from "../lib/layout/coverage.ts";
 import { layoutProjectPages } from "../lib/layout/project-layout.ts";
+import { getLastPaginationDiagnostics } from "../lib/layout/block-layout-engine.ts";
 import { createApproximateTextMeasurer } from "../lib/layout/text-measure.ts";
 import { renderTextLayer } from "../lib/handwriting/canvas-renderer.ts";
 import { BACKGROUND_PRESETS } from "../lib/handwriting/background-library.ts";
@@ -74,6 +75,7 @@ test("Golden DOCX actual rendered text coverage, supported modes, and deletion d
     lineDetection: ruledDetection, blockIds: [], lines: [],
   }] };
   const ruledPages = layoutProjectPages(ruledState, createApproximateTextMeasurer(), FONT_SLOTS[0]);
+  const ruledDiagnostics = getLastPaginationDiagnostics();
   const ruledCoverage = validateDocumentCoverage([], ruledPages, { blocks });
   assert.equal(ruledCoverage.missingCharacters, 0);
   assert.ok(ruledPages.length >= 3);
@@ -83,7 +85,9 @@ test("Golden DOCX actual rendered text coverage, supported modes, and deletion d
     assert.equal(new Set(assignments).size, assignments.length);
     assert.ok(assignments.every((index) => index !== undefined && index >= 1 && index <= 20));
   }
+  assert.equal(ruledDiagnostics.some((item) => item.breakReason === "avoidable-gap"), false,
+    JSON.stringify(ruledDiagnostics));
   console.log(JSON.stringify({ mode: "background-aware", raw: result.document.rawCharacterCount,
     laidOut: ruledCoverage.laidOutCharacterCount, pages: ruledPages.length, usableLinesPerPage: 20,
-    missing: ruledCoverage.missingCharacters }));
+    missing: ruledCoverage.missingCharacters, diagnostics: ruledDiagnostics }));
 });

@@ -50,6 +50,7 @@ next-env.d.ts
 /outputs/
 /output/
 /.logs/
+/.tmp/
 /work/
 /acceptance-clean/
 /tmp/

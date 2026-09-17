@@ -1,9 +1,10 @@
 import { renderBackground } from "./background-library.ts";
 import { assertFontReady, fontCssFamily } from "./font-library.ts";
 import { generateCharacterStates } from "./randomization.ts";
-import { automaticCorrectionMarks, normalizeCorrectionStyle } from "./correction-style.ts";
+import { automaticCorrectionMarks, correctionMarksByBlock, normalizeCorrectionStyle } from "./correction-style.ts";
 import { generateInkStates, normalizeInkStyle } from "./ink-style.ts";
 import { lineX, lineY, type BackgroundAsset, type CorrectionMark, type CorrectionStyle, type FontAsset, type HandwritingStyle, type InkStyle, type LineLayout, type PageFooterMode, type PageState } from "./types.ts";
+import { monotonicNow, recordRenderTiming } from "../performance/performance-monitor.ts";
 
 export const PAGE_WIDTH = 595;
 export const PAGE_HEIGHT = 842;
@@ -125,7 +126,7 @@ function correctionMarksForLine(line: LineLayout, options: RenderOptions): Corre
   if (!style.enabled) return [];
   const blockId = line.blockId ?? line.fieldId;
   const source = options.fieldTextById?.[line.fieldId] ?? line.text;
-  return [...style.marks.filter((mark) => mark.blockId === blockId), ...automaticCorrectionMarks(line, source, style, options.seed, options.documentId)];
+  return [...(correctionMarksByBlock(style).get(blockId) ?? []), ...automaticCorrectionMarks(line, source, style, options.seed, options.documentId)];
 }
 
 function renderCorrections(context: CanvasRenderingContext2D, line: LineLayout, glyphs: RenderedGlyph[], options: RenderOptions, fontFamily: string) {
@@ -168,10 +169,17 @@ function shouldRenderGeneratedFooter(options: RenderOptions) {
 }
 
 export function renderPageBackground(context: CanvasRenderingContext2D, options: RenderOptions) {
+  const started = monotonicNow();
   context.clearRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
   renderBackground(context, options.background, options.page.backgroundAdjustments, PAGE_WIDTH, PAGE_HEIGHT,
     `paper:${options.page.pageId}`, options.backgroundImage, options.page.backgroundTransform);
   renderHeader(context, options);
+  recordRenderTiming("background", monotonicNow() - started);
+}
+
+export function renderOverlayLayer(context: CanvasRenderingContext2D, options: RenderOptions, bounds: LineBounds[], clear = true) {
+  const started = monotonicNow();
+  if (clear) context.clearRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
   const detection = options.page.lineDetection;
   if (options.showLineGuides && detection?.enabled && detection.showLines) {
     context.save();
@@ -187,9 +195,22 @@ export function renderPageBackground(context: CanvasRenderingContext2D, options:
     }
     context.restore();
   }
+  if (options.showSelection && options.selectedLineId) {
+    const box = bounds.find((item) => item.id === options.selectedLineId);
+    if (box) {
+      context.save(); context.strokeStyle = "rgba(40,126,134,.72)"; context.fillStyle = "rgba(230,247,246,.45)"; context.lineWidth = 1;
+      context.fillRect(box.x, box.y, box.width, box.height); context.strokeRect(box.x, box.y, box.width, box.height);
+      context.fillStyle = "#fff"; context.strokeStyle = "#287e86";
+      for (const handleX of [box.x, box.x + box.width]) { context.beginPath(); context.rect(handleX - 3, box.y + box.height / 2 - 3, 6, 6); context.fill(); context.stroke(); }
+      context.restore();
+    }
+  }
+  recordRenderTiming("overlay", monotonicNow() - started);
 }
 
 export function renderTextLayer(context: CanvasRenderingContext2D, options: RenderOptions, clear = true): LineBounds[] {
+  const started = monotonicNow();
+  let correctionMs = 0;
   if (clear) context.clearRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
   context.textBaseline = "alphabetic";
   const bounds: LineBounds[] = [];
@@ -262,23 +283,20 @@ export function renderTextLayer(context: CanvasRenderingContext2D, options: Rend
       glyphs.push({ sourceIndex, x: glyphX, width: measured * state.scaleX * columnScale, top: -size, bottom: 2 });
       cursor += (measured + line.letterSpacing) * columnScale;
     }
+    const correctionStarted = monotonicNow();
     renderCorrections(context, line, glyphs, options, fontCssFamily(lineFont));
+    correctionMs += monotonicNow() - correctionStarted;
     context.restore();
     const structuredWidth = line.columnWidths?.reduce((sum, width) => sum + width, 0) ?? 0;
     const box = { id: line.id, x: x - 5, y: y - line.fontSize - 8, width: Math.max(36, structuredWidth || cursor + 10), height: Math.max(line.fontSize + 18, line.lineHeight) };
     bounds.push(box);
-    if (options.showSelection && line.id === options.selectedLineId) {
-      context.save(); context.strokeStyle = "rgba(40,126,134,.72)"; context.fillStyle = "rgba(230,247,246,.45)"; context.lineWidth = 1;
-      context.fillRect(box.x, box.y, box.width, box.height); context.strokeRect(box.x, box.y, box.width, box.height);
-      context.fillStyle = "#fff"; context.strokeStyle = "#287e86";
-      for (const handleX of [box.x, box.x + box.width]) { context.beginPath(); context.rect(handleX - 3, box.y + box.height / 2 - 3, 6, 6); context.fill(); context.stroke(); }
-      context.restore();
-    }
   }
   if (shouldRenderGeneratedFooter(options)) {
     context.save(); context.fillStyle = "rgba(87,101,108,.58)"; context.font = "11px 'Microsoft YaHei UI', sans-serif";
     context.textAlign = "center"; context.fillText(`第 ${options.page.pageIndex + 1} 页 / 共 ${options.pageCount} 页`, PAGE_WIDTH / 2, 820); context.restore();
   }
+  recordRenderTiming("correction", correctionMs);
+  recordRenderTiming("text", monotonicNow() - started);
   return bounds;
 }
 

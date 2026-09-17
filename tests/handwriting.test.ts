@@ -137,7 +137,7 @@ test("a long paragraph consumes remaining page space without creating an avoidab
     backgroundId: BACKGROUND_PRESETS[0].id, mode: "preserve-structure",
   });
   assert.equal(result.pages.length, 2);
-  assert.deepEqual(result.pages.map((page) => page.lines.length), [11, 2]);
+  assert.deepEqual(result.pages.map((page) => page.lines.length), [12, 1]);
   const coverage = validateDocumentCoverage([], result.pages, { blocks });
   assert.equal(coverage.missingCharacters, 0);
 });

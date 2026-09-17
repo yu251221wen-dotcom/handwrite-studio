@@ -8,15 +8,16 @@
 
 ## 当前版本
 
-- Version：4.2.0（V4.2，本地已完成；公网待推送授权）
+- Version：4.2.1（V4.2.1，本地实现完成，正在执行发布前验收）
 - SchemaVersion：3
-- 更新日期：2026-09-16
+- 更新日期：2026-09-17
 - GitHub：`https://github.com/yu251221wen-dotcom/handwrite-studio`
 - V4 实现提交：`e6926cdf07dd0116e68ee6d9c34243de65596448`
 - 横线吸附防重叠修复：`41ebf6e55ecb345c7c3b6534c51a3addff629405`
 - V4 公网背景与单调吸附修复：`e83bb92`
 - V4.1 背景感知纸线槽位布局：`1282c2f`
 - V4.2 排版与手写外观：`3a24d79`
+- V4.2.1 性能与分页修复：待本轮验收提交
 
 ---
 
@@ -80,6 +81,13 @@
 - [x] 独立 InkStyle：墨色、低频深浅、洇墨、飞白、断墨
 - [x] 独立 CorrectionStyle：手动划改/涂抹/插入/补写与保守自动模式
 - [x] V4.2 外观状态保存到 Schema V3 JSON；旧 V3 无重排补默认值
+- [x] V4.2.1 当前页与相邻页 Canvas 虚拟化，离屏页不参与重绘
+- [x] 背景、正文/涂改、交互覆盖三层 Canvas 独立重绘
+- [x] 滑块 rAF 预览与松开单次 history commit
+- [x] 字体就绪缓存、字符墨迹缓存、按 Block 的涂改索引
+- [x] 分页槽位诊断与可拆分正文页尾压实
+- [x] 连续签名两槽成组、标题 widow、处方四列末槽规则
+- [x] 页面间 `continuation` 标签移除
 - [x] 可写纸线耗尽后自动分页；不再在检测范围外虚构纸线
 - [x] character-level handwriting
 - [x] deterministic Seed
@@ -121,7 +129,7 @@
 
 ## 当前最高优先级
 
-当前阶段：V4.2 本地实现和验收已完成，等待明确授权推送到现有 GitHub `main` 并触发公网部署
+当前阶段：V4.2.1 发布前验收；通过后按本轮任务要求推送现有 GitHub `main` 并触发公网部署
 
 1. Cloudflare Pages 正式前端保持可用
 2. 保持 Session isolation、精确 CORS 和 `/health`
@@ -139,19 +147,22 @@
 
 ## 最近测试结果
 
-- TypeScript：45 / 45 通过
+- TypeScript：51 / 51 通过
 - Python：16 / 16 通过
 - Typecheck：通过
 - ESLint：0 error
 - Build：Vinext production build 通过
 - Cloudflare Pages 静态导出：通过；4 个正式路由均生成到 `out/`
-- FastAPI health：本地通过，`status=ok`、`version=4.2.0`；公网仍为 V4.1，待推送部署
+- FastAPI health：本地通过，`status=ok`、`version=4.2.1`；公网当前为 `4.2.0`，待本轮推送后升级
 - Golden Test：Raw 3657 / Laid out 3657 / Missing 0；实际 Canvas `fillText` 覆盖率通过
 - 公网 DOCX：合成长文档 Raw 3097 / Laid out 3097 / Missing 0，DocumentBlock 5，自动排版 7 页
 - 横线检测：标准/噪声/粗线双边缘合并单测通过；纯白背景不会误启用吸附
 - 横线布局：检测纸线是纵向主坐标系；正文/列表连续占用物理纸线；纸线索引严格递增；重复分配为 0；纸线不足时分页，不在边缘外延伸虚构纸线
-- 背景感知 Golden：Raw 3657 / Laid out 3657 / Missing 0；每页 20 条可写纸线，共 10 页
-- V4.2 Golden：Preserve structure 9 页、Simplified 9 页、背景感知 10 页；Raw 3657 / Laid out 3657 / Missing 0；Canvas 实际字符绘制覆盖通过
+- 背景感知 Golden：Raw 3657 / Laid out 3657 / Missing 0；每页 20 条可写纸线，共 9 页
+- V4.2.1 Golden：Preserve structure 8 页、Simplified 8 页、背景感知 9 页；Raw 3657 / Laid out 3657 / Missing 0；Canvas 实际字符绘制覆盖通过
+- V4.2.1 分页：段落/列表可占页尾末槽；连续签名在末两槽成组；处方四列可占末槽；标题与至少一行正文同页；逐页诊断未发现可避免正文空槽
+- V4.2.1 性能：8–10 页编辑器最多挂载 3 页 Canvas；辅助线/选框不重绘文字，墨迹/涂改不触发布局；性能监测分别记录背景、文字、涂改、覆盖与 wrap/pagination/slot-assignment
+- V4.2.1 浏览器性能：9 页文档中间页挂载 3 页 / 9 个分层 Canvas；改墨色时 layout 与 background redraw 增量均为 0，仅当前及相邻文字层重绘；辅助线切换 text redraw 增量 0、overlay 增量 2；右边界单次提交 layout 增量 1
 - V4.2 排版：处方 `auto` 为 `4 + 4 + 1` 单元；签名两行整体续页并右对齐；普通段落/列表连续占用纸线槽位
 - V4.2 墨迹：同参数同 Seed 完全一致、换 Seed 不同；key 不含 pageIndex/x/y/background；飞白/断墨只在透明文字层切出细纹，不擦除背景
 - V4.2 页码：程序页码位于底部中央；背景标记原生页码后程序页码隐藏；两种状态均经浏览器预览和 300 DPI PNG 验证
@@ -181,8 +192,9 @@ V4.1 完整源码测试、本地验收和公网验收均已通过。正式 ZIP �
 
 ## 当前 Golden 输出
 
-- Preserve structure pages：10（V3.1.1 前为 11；减少可避免页尾空白）
-- Simplified pages：10
+- Preserve structure pages：8
+- Simplified pages：8
+- Background-aware pages：9（每页 20 个可写纸线槽位）
 - 300 DPI：2480 × 3508 px
 - PDF：真正多页导出链路测试通过；页数与 `pages.length` 一致
 
@@ -190,10 +202,10 @@ V4.1 完整源码测试、本地验收和公网验收均已通过。正式 ZIP �
 
 ## 当前本地地址
 
-- Frontend：V4.2 运行于 `http://localhost:5173/`
-- Showcase：V4.2 运行于 `http://localhost:5173/showcase`
-- Backend：V4.2 运行于 `http://127.0.0.1:8000`
-- Health：本地验证 `status=ok`、`version=4.2.0`
+- Frontend：V4.2.1 运行于 `http://localhost:5173/`（HTTP 200）
+- Showcase：V4.2.1 运行于 `http://localhost:5173/showcase`
+- Backend：V4.2.1 运行于 `http://127.0.0.1:8000`
+- Health：`status=ok`、`version=4.2.1`、`environment=development`
 
 ---
 
@@ -201,18 +213,18 @@ V4.1 完整源码测试、本地验收和公网验收均已通过。正式 ZIP �
 
 - Frontend：`https://handwrite-studio.pages.dev/`
 - API：`https://handwrite-studio-api-production.up.railway.app`
-- Health：`https://handwrite-studio-api-production.up.railway.app/health`（HTTP 200，`status=ok`、`version=4.1.0`、`environment=production`）
+- Health：`https://handwrite-studio-api-production.up.railway.app/health`（发布前复验为 HTTP 200，`status=ok`、`version=4.2.0`、`environment=production`）
 - Showcase：`https://handwrite-studio.pages.dev/showcase/`
 
-当前公网仍为 V4.1；V4.2 推送因外发授权未获批准而暂停，没有绕过授权发布。
+当前公网为 V4.2；V4.2.1 将在本轮验收提交推送后由现有流水线发布。
 
 ---
 
 ## 当前部署状态
 
-Railway FastAPI production 后端已部署 V4.1：服务 `handwrite-studio-api`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。`ALLOWED_ORIGINS` 精确设置为 `https://handwrite-studio.pages.dev`。Render 因绑卡要求停用。
+Railway FastAPI production 后端当前部署 V4.2：服务 `handwrite-studio-api`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。`ALLOWED_ORIGINS` 精确设置为 `https://handwrite-studio.pages.dev`。Render 因绑卡要求停用。
 
-Cloudflare Pages production 前端当前仍部署 V4.1：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。V4.2 本地提交为 `3a24d79`，等待明确授权推送后由现有流水线发布。
+Cloudflare Pages production 前端当前部署 V4.2：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。V4.2.1 将由本轮 GitHub `main` 推送触发发布。
 
 ---
 

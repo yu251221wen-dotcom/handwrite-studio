@@ -3,9 +3,10 @@
 import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiAssetBlob } from "@/lib/api/client";
-import { PAGE_HEIGHT, PAGE_WIDTH, renderPageBackground, renderTextLayer, type LineBounds, type RenderOptions } from "@/lib/handwriting/canvas-renderer";
+import { PAGE_HEIGHT, PAGE_WIDTH, renderOverlayLayer, renderPageBackground, renderTextLayer, type LineBounds, type RenderOptions } from "@/lib/handwriting/canvas-renderer";
 import { ensureFontsReady } from "@/lib/handwriting/font-library";
 import type { LineLayout } from "@/lib/handwriting/types";
+import { recordComponentRender } from "@/lib/performance/performance-monitor";
 
 interface Props {
   options: RenderOptions;
@@ -18,13 +19,16 @@ interface Props {
 }
 
 export function HandwritingCanvas({ options, onSelectLine, onChangeLines, zoom = 0.82, active = false, onActivate, onRenderError }: Props) {
+  useEffect(() => { recordComponentRender("HandwritingCanvas"); });
   const backgroundRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const boundsRef = useRef<LineBounds[]>([]);
   const dragRef = useRef<{ id: string; x: number; y: number; startX: number; startY: number } | null>(null);
   const [imageResource, setImageResource] = useState<{ url: string; image: HTMLImageElement }>();
   const [renderError, setRenderError] = useState("");
-  const ratio = 2;
+  // Preview stays at screen resolution. Export uses A4_PIXELS separately.
+  const ratio = typeof window === "undefined" ? 1 : Math.max(1, Math.min(1.5, window.devicePixelRatio || 1));
 
   useEffect(() => {
     if (options.background.kind !== "uploaded" || !options.background.fileUrl) return;
@@ -55,7 +59,7 @@ export function HandwritingCanvas({ options, onSelectLine, onChangeLines, zoom =
       const context = canvas.getContext("2d");
       if (!context) return;
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      renderPageBackground(context, renderOptions);
+      renderPageBackground(context, { ...renderOptions, showLineGuides: false, showSelection: false });
       setRenderError("");
     }).catch((error) => {
       const message = error instanceof Error ? error.message : "字体加载失败";
@@ -64,7 +68,8 @@ export function HandwritingCanvas({ options, onSelectLine, onChangeLines, zoom =
     return () => { cancelled = true; };
     // Background is deliberately independent from line edits and character naturality.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderOptions.background, renderOptions.page.backgroundAdjustments, renderOptions.page.backgroundTransform, renderOptions.page.lineDetection, renderOptions.showLineGuides, renderOptions.font, renderOptions.handwriting.inkColor, image, onRenderError]);
+  }, [renderOptions.background, renderOptions.page.backgroundAdjustments, renderOptions.page.backgroundTransform,
+    renderOptions.page.backgroundHasNativePageFooter, renderOptions.font, image, onRenderError]);
 
   useEffect(() => {
     const canvas = textRef.current;
@@ -80,7 +85,16 @@ export function HandwritingCanvas({ options, onSelectLine, onChangeLines, zoom =
           const context = canvas.getContext("2d");
           if (!context) return;
           context.setTransform(ratio, 0, 0, ratio, 0, 0);
-          boundsRef.current = renderTextLayer(context, { ...renderOptions, showSelection: true, isolatedTextLayer: true });
+          boundsRef.current = renderTextLayer(context, { ...renderOptions, showSelection: false, showLineGuides: false, isolatedTextLayer: true });
+          const overlay = overlayRef.current;
+          if (overlay) {
+            overlay.width = PAGE_WIDTH * ratio; overlay.height = PAGE_HEIGHT * ratio;
+            const overlayContext = overlay.getContext("2d");
+            if (overlayContext) {
+              overlayContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+              renderOverlayLayer(overlayContext, { ...renderOptions, showSelection: true }, boundsRef.current);
+            }
+          }
           setRenderError("");
         } catch (error) {
           const message = error instanceof Error ? error.message : "画布绘制失败";
@@ -92,7 +106,24 @@ export function HandwritingCanvas({ options, onSelectLine, onChangeLines, zoom =
       setRenderError(message); onRenderError?.(message);
     });
     return () => { cancelled = true; if (frame) cancelAnimationFrame(frame); };
-  }, [renderOptions, onRenderError]);
+    // Appearance changes redraw only this page's text layer; selection and guides live in the overlay.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderOptions.page.lines, renderOptions.page.pageIndex, renderOptions.page.backgroundHasNativePageFooter,
+    renderOptions.pageCount, renderOptions.font, renderOptions.fonts, renderOptions.handwriting, renderOptions.inkStyle,
+    renderOptions.correctionStyle, renderOptions.footerMode, renderOptions.seed, renderOptions.documentId,
+    renderOptions.patientFields, renderOptions.fieldTextById, image, onRenderError]);
+
+  useEffect(() => {
+    const canvas = overlayRef.current;
+    if (!canvas) return;
+    canvas.width = PAGE_WIDTH * ratio; canvas.height = PAGE_HEIGHT * ratio;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    renderOverlayLayer(context, { ...renderOptions, showSelection: true }, boundsRef.current);
+    // Overlay-only state must never invalidate the text/background canvases.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderOptions.selectedLineId, renderOptions.showLineGuides, renderOptions.page.lineDetection, ratio]);
 
   const point = (event: PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -129,7 +160,8 @@ export function HandwritingCanvas({ options, onSelectLine, onChangeLines, zoom =
   return (
     <div className={`paper-canvas relative shrink-0 overflow-hidden bg-white shadow-[0_12px_44px_rgb(27_50_56/16%)] ${active ? "ring-2 ring-[#287e86] ring-offset-4" : ""}`} style={{ width: PAGE_WIDTH * zoom, height: PAGE_HEIGHT * zoom }}>
       <canvas ref={backgroundRef} className="absolute inset-0 h-full w-full" aria-hidden="true" />
-      <canvas ref={textRef} className="absolute inset-0 h-full w-full touch-none" aria-label={`A4 手写文档画布，第 ${options.page.pageIndex + 1} 页`} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} />
+      <canvas ref={textRef} className="absolute inset-0 h-full w-full" aria-hidden="true" />
+      <canvas ref={overlayRef} className="absolute inset-0 h-full w-full touch-none" aria-label={`A4 手写文档画布，第 ${options.page.pageIndex + 1} 页`} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} />
       {renderError && <div role="alert" className="absolute inset-x-4 top-4 rounded-lg bg-rose-50/95 p-3 text-xs text-rose-700 shadow">{renderError}</div>}
     </div>
   );
