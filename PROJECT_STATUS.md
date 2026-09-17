@@ -8,16 +8,16 @@
 
 ## 当前版本
 
-- Version：4.2.1（V4.2.1，本地实现完成，正在执行发布前验收）
+- Version：4.2.1（V4.2.1，本地与公网验收完成）
 - SchemaVersion：3
-- 更新日期：2026-09-17
+- 更新日期：2026-09-18
 - GitHub：`https://github.com/yu251221wen-dotcom/handwrite-studio`
 - V4 实现提交：`e6926cdf07dd0116e68ee6d9c34243de65596448`
 - 横线吸附防重叠修复：`41ebf6e55ecb345c7c3b6534c51a3addff629405`
 - V4 公网背景与单调吸附修复：`e83bb92`
 - V4.1 背景感知纸线槽位布局：`1282c2f`
 - V4.2 排版与手写外观：`3a24d79`
-- V4.2.1 性能与分页修复：待本轮验收提交
+- V4.2.1 性能与分页修复：`5d7dc30`
 
 ---
 
@@ -129,7 +129,7 @@
 
 ## 当前最高优先级
 
-当前阶段：V4.2.1 发布前验收；通过后按本轮任务要求推送现有 GitHub `main` 并触发公网部署
+当前阶段：V4.2.1 已完成本地、GitHub `main`、Railway 与 Cloudflare Pages 公网验收；本轮不启动 V4.3
 
 1. Cloudflare Pages 正式前端保持可用
 2. 保持 Session isolation、精确 CORS 和 `/health`
@@ -153,7 +153,7 @@
 - ESLint：0 error
 - Build：Vinext production build 通过
 - Cloudflare Pages 静态导出：通过；4 个正式路由均生成到 `out/`
-- FastAPI health：本地通过，`status=ok`、`version=4.2.1`；公网当前为 `4.2.0`，待本轮推送后升级
+- FastAPI health：本地与公网均通过，`status=ok`、`version=4.2.1`
 - Golden Test：Raw 3657 / Laid out 3657 / Missing 0；实际 Canvas `fillText` 覆盖率通过
 - 公网 DOCX：合成长文档 Raw 3097 / Laid out 3097 / Missing 0，DocumentBlock 5，自动排版 7 页
 - 横线检测：标准/噪声/粗线双边缘合并单测通过；纯白背景不会误启用吸附
@@ -163,6 +163,7 @@
 - V4.2.1 分页：段落/列表可占页尾末槽；连续签名在末两槽成组；处方四列可占末槽；标题与至少一行正文同页；逐页诊断未发现可避免正文空槽
 - V4.2.1 性能：8–10 页编辑器最多挂载 3 页 Canvas；辅助线/选框不重绘文字，墨迹/涂改不触发布局；性能监测分别记录背景、文字、涂改、覆盖与 wrap/pagination/slot-assignment
 - V4.2.1 浏览器性能：9 页文档中间页挂载 3 页 / 9 个分层 Canvas；改墨色时 layout 与 background redraw 增量均为 0，仅当前及相邻文字层重绘；辅助线切换 text redraw 增量 0、overlay 增量 2；右边界单次提交 layout 增量 1
+- V4.2.1 公网验收：合成 3000+ 字 DOCX 自动排版 7 页，Missing 0；切换第 4 页时仅挂载第 3–5 页共 9 个分层 Canvas；主画布不含 `continuation` 标签；控制台 0 error/warning
 - V4.2 排版：处方 `auto` 为 `4 + 4 + 1` 单元；签名两行整体续页并右对齐；普通段落/列表连续占用纸线槽位
 - V4.2 墨迹：同参数同 Seed 完全一致、换 Seed 不同；key 不含 pageIndex/x/y/background；飞白/断墨只在透明文字层切出细纹，不擦除背景
 - V4.2 页码：程序页码位于底部中央；背景标记原生页码后程序页码隐藏；两种状态均经浏览器预览和 300 DPI PNG 验证
@@ -186,7 +187,7 @@
 - Cloudflare Pages：4 个正式路由 `/`、`/font-library/`、`/background-library/`、`/showcase/` 均为 HTTP 200
 - Clean-room：V3.0 最近一次通过；V4.1 尚未重新打包和执行 clean-room
 
-V4.1 完整源码测试、本地验收和公网验收均已通过。正式 ZIP 与 clean-room 仍需在单独的源码交付轮次更新。
+V4.2.1 完整源码测试、本地验收和公网验收均已通过。正式 ZIP 与 clean-room 仍需在单独的源码交付轮次更新。
 
 ---
 
@@ -213,18 +214,18 @@ V4.1 完整源码测试、本地验收和公网验收均已通过。正式 ZIP �
 
 - Frontend：`https://handwrite-studio.pages.dev/`
 - API：`https://handwrite-studio-api-production.up.railway.app`
-- Health：`https://handwrite-studio-api-production.up.railway.app/health`（发布前复验为 HTTP 200，`status=ok`、`version=4.2.0`、`environment=production`）
+- Health：`https://handwrite-studio-api-production.up.railway.app/health`（HTTP 200，`status=ok`、`version=4.2.1`、`environment=production`）
 - Showcase：`https://handwrite-studio.pages.dev/showcase/`
 
-当前公网为 V4.2；V4.2.1 将在本轮验收提交推送后由现有流水线发布。
+当前公网为 V4.2.1；正式前端与 API 均已完成发布后复验。
 
 ---
 
 ## 当前部署状态
 
-Railway FastAPI production 后端当前部署 V4.2：服务 `handwrite-studio-api`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。`ALLOWED_ORIGINS` 精确设置为 `https://handwrite-studio.pages.dev`。Render 因绑卡要求停用。
+Railway FastAPI production 后端当前部署 V4.2.1：服务 `handwrite-studio-api`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。`ALLOWED_ORIGINS` 精确设置为 `https://handwrite-studio.pages.dev`。Render 因绑卡要求停用。
 
-Cloudflare Pages production 前端当前部署 V4.2：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。V4.2.1 将由本轮 GitHub `main` 推送触发发布。
+Cloudflare Pages production 前端当前部署 V4.2.1：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。公网合成长文档与虚拟化验收已通过。
 
 ---
 
