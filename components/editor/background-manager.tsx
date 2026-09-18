@@ -24,7 +24,7 @@ function Adjustment({ label, value, min, max, unit, onChange }: { label: string;
   return <div className="space-y-2"><div className="flex justify-between text-xs text-slate-500"><span>{label}</span><span>{value}{unit}</span></div><RafSlider ariaLabel={label} value={value} min={min} max={max} onCommit={onChange} /></div>;
 }
 
-export function BackgroundManager({ backgrounds, selectedId, adjustments, transform, lineDetection, snapDiagnostics, detecting, onSelect, onAdjust, onTransform, onLineDetection, onDetectLines, onApplySuggestedLayout, onApplyToAll, onUploaded }: { backgrounds: BackgroundAsset[]; selectedId: string; adjustments: BackgroundAdjustments; transform: BackgroundTransform; lineDetection: HorizontalLineDetection; snapDiagnostics: LineSnapDiagnostic[]; detecting: boolean; onSelect: (id: string) => void; onAdjust: (value: BackgroundAdjustments) => void; onTransform: (value: BackgroundTransform) => void; onLineDetection: (value: HorizontalLineDetection) => void; onDetectLines: () => void; onApplySuggestedLayout: (fontSize: number, lineHeight: number) => void; onApplyToAll: () => void; onUploaded: (asset: BackgroundAsset) => void }) {
+export function BackgroundManager({ backgrounds, selectedId, adjustments, transform, lineDetection, snapDiagnostics, detecting, previewingAll, onSelect, onAdjust, onTransform, onLineDetection, onDetectLines, onApplySuggestedLayout, onPreviewAll, onConfirmAll, onCancelAll, onUploaded }: { backgrounds: BackgroundAsset[]; selectedId: string; adjustments: BackgroundAdjustments; transform: BackgroundTransform; lineDetection: HorizontalLineDetection; snapDiagnostics: LineSnapDiagnostic[]; detecting: boolean; previewingAll: boolean; onSelect: (id: string) => void; onAdjust: (value: BackgroundAdjustments) => void; onTransform: (value: BackgroundTransform) => void; onLineDetection: (value: HorizontalLineDetection) => void; onDetectLines: () => void; onApplySuggestedLayout: (fontSize: number, lineHeight: number) => void; onPreviewAll: () => void; onConfirmAll: () => void; onCancelAll: () => void; onUploaded: (asset: BackgroundAsset) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState(`${backgrounds.filter((item) => item.kind === "preset").length} 种程序生成预设；图片保存在本机`);
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -90,7 +90,7 @@ export function BackgroundManager({ backgrounds, selectedId, adjustments, transf
           </div>}
           <div className="grid grid-cols-2 gap-2"><Button variant="outline" size="sm" onClick={addLine}><Plus />添加横线</Button><Button variant="outline" size="sm" onClick={() => onLineDetection({ ...DEFAULT_LINE_DETECTION })}><RotateCcw />重置</Button></div>
         </div>
-        <Button variant="outline" className="w-full" onClick={onApplyToAll}>应用到全部页面</Button>
+        {previewingAll ? <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs leading-5 text-amber-800">正在预览全部页面，可翻页检查；尚未写入项目历史。</p><div className="grid grid-cols-2 gap-2"><Button size="sm" onClick={onConfirmAll}>确认应用</Button><Button size="sm" variant="outline" onClick={onCancelAll}>取消预览</Button></div></div> : <Button variant="outline" className="w-full" onClick={onPreviewAll}>预览应用到全部页面</Button>}
       </div>
     </section>
   );

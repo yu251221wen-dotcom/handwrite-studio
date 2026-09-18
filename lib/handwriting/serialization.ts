@@ -5,6 +5,7 @@ import { mapSourceCharacters } from "./source-character-map.ts";
 import { applyLineSnapping, DEFAULT_LINE_DETECTION, normalizeLineDetection } from "../background/line-detection.ts";
 import { normalizeCorrectionStyle } from "./correction-style.ts";
 import { normalizeInkStyle } from "./ink-style.ts";
+import { DEFAULT_TABLE_LINE_STYLE, normalizeTableLineStyle } from "./table-line-style.ts";
 
 export function serializeProject(state: ProjectState): string {
   return JSON.stringify(disableLegacyTemplateState({ ...state, updatedAt: new Date().toISOString() }), null, 2);
@@ -13,7 +14,7 @@ export function serializeProject(state: ProjectState): string {
 function disableLegacyTemplateState(state: ProjectState): ProjectState {
   return {
     ...state,
-    projectVersion: "4.2.1",
+    projectVersion: "4.3.0",
     layoutMode: "no-template",
     templateId: null,
     mappedBlockIds: [],
@@ -21,6 +22,8 @@ function disableLegacyTemplateState(state: ProjectState): ProjectState {
     inkStyle: normalizeInkStyle(state.inkStyle, state.handwriting.inkColor),
     correctionStyle: normalizeCorrectionStyle(state.correctionStyle),
     footerMode: state.footerMode ?? "auto",
+    tableLineMode: state.tableLineMode ?? "auto",
+    tableLineStyle: normalizeTableLineStyle(state.tableLineStyle),
     pages: state.pages.map((page) => applyLineSnapping(page, normalizeLineDetection(page.lineDetection ?? DEFAULT_LINE_DETECTION))),
   };
 }
@@ -78,11 +81,12 @@ export function migrateProjectV2(old: ProjectStateV2): ProjectState {
   });
   const blockByField = new Map(old.fieldMappings.map((field) => [field.id, `v2-field-${field.id}`]));
   return {
-    ...old, schemaVersion: 3, projectVersion: "4.2.1", layoutMode: "no-template",
+    ...old, schemaVersion: 3, projectVersion: "4.3.0", layoutMode: "no-template",
     noTemplateMode: "preserve-structure", templateId: null, documentBlocks,
     mappedBlockIds: [], unmappedBlockIds: [],
     explicitlyIgnoredBlockIds: [], documentLayoutSettings: { ...DEFAULT_DOCUMENT_LAYOUT_SETTINGS },
     inkStyle: normalizeInkStyle(undefined, old.handwriting.inkColor), correctionStyle: normalizeCorrectionStyle(), footerMode: "auto",
+    tableLineMode: "auto", tableLineStyle: { ...DEFAULT_TABLE_LINE_STYLE },
     fieldMappings: old.fieldMappings.map((field) => ({ ...field, sourceBlockIds: field.sourceBlockIds ?? [blockByField.get(field.id)!] })),
     pages: old.pages.map((page, pageIndex) => ({ ...page, pageIndex,
       pageType: pageIndex === 0 ? "first" : "continuation", pageTemplateId: page.templateId,

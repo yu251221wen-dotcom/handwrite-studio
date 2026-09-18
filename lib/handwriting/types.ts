@@ -8,6 +8,7 @@ export type NoTemplateMode = "preserve-structure" | "simplified";
 export type DocumentBlockType = "heading" | "paragraph" | "key-value" | "list" | "table" | "prescription" | "signature";
 export type PageType = "first" | "continuation" | "blank" | "custom";
 export type PageFooterMode = "auto" | "native" | "generated" | "hidden";
+export type TableLineMode = "auto" | "hidden" | "adaptive" | "visible";
 export type CorrectionType = "single-strike" | "double-strike" | "diagonal" | "scribble" | "caret" | "rewrite-above" | "rewrite-side";
 
 export interface FontAsset {
@@ -148,6 +149,9 @@ export interface CharacterRenderState {
 export interface ExportSettings {
   pageSize: "A4"; dpi: ExportDpi; format: ExportFormat; jpgQuality: number;
 }
+export interface TableLineStyle {
+  color: string; alpha: number; width: number;
+}
 export interface SourceDocumentState {
   id: string; name: string; rawTexts: string[]; sourceCharacterCount: number;
 }
@@ -172,6 +176,8 @@ export interface ProjectStateV3 {
   handwriting: HandwritingStyle; exportSettings: ExportSettings; updatedAt: string;
   /** V4.2 additions are optional only so existing Schema V3 project JSON opens without re-layout. */
   inkStyle?: InkStyle; correctionStyle?: CorrectionStyle; footerMode?: PageFooterMode;
+  /** V4.3 additions remain optional so older Schema V3 files normalize without relayout. */
+  tableLineMode?: TableLineMode; tableLineStyle?: TableLineStyle;
 }
 export interface ProjectStateV2 {
   schemaVersion: 2; projectVersion: string; id: string; document: SourceDocumentState;

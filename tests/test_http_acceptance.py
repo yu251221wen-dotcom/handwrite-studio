@@ -54,7 +54,7 @@ class HttpAcceptanceTests(unittest.TestCase):
     def session(self):
         return json.loads(self.request('/api/session', b'')[2])['sessionId']
 
-    def multipart(self, path, files, fields=None, session=None):
+    def multipart(self, path, files, fields=None, session=None, method=None):
         boundary = 'HandwriteAcceptanceBoundary'
         pieces = []
         for name, value in (fields or {}).items():
@@ -62,12 +62,12 @@ class HttpAcceptanceTests(unittest.TestCase):
         for field, filename, media, data in files:
             pieces.extend([f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"; filename="{filename}"\r\nContent-Type: {media}\r\n\r\n'.encode(), data, b'\r\n'])
         pieces.append(f'--{boundary}--\r\n'.encode())
-        return self.request(path, b''.join(pieces), {'Content-Type': f'multipart/form-data; boundary={boundary}', 'X-Session-ID': session or self.session()})
+        return self.request(path, b''.join(pieces), {'Content-Type': f'multipart/form-data; boundary={boundary}', 'X-Session-ID': session or self.session()}, method)
 
     def test_health_and_exact_cors(self):
         status, headers, body = self.request('/health', headers={'Origin': 'http://localhost:5173'})
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body)['version'], '4.2.1')
+        self.assertEqual(json.loads(body)['version'], '4.3.0')
         self.assertEqual(headers.get('access-control-allow-origin'), 'http://localhost:5173')
         self.assertNotIn('access-control-allow-origin', self.request('/health', headers={'Origin': 'https://untrusted.example'})[1])
 
@@ -126,6 +126,19 @@ class HttpAcceptanceTests(unittest.TestCase):
             box = re.search(rb'/MediaBox\s*\[([^\]]+)\]', body).group(1).split()
             self.assertAlmostEqual(float(box[2]), 595.276, delta=.1)
             self.assertAlmostEqual(float(box[3]), 841.89, delta=.5)
+
+    def test_streamed_pdf_job_upload_complete_and_cleanup(self):
+        session = self.session()
+        status, _, body = self.request('/api/export/pdf-jobs', b'', {'X-Session-ID': session}, 'POST')
+        self.assertEqual(status, 200); job_id = json.loads(body)['jobId']
+        image = io.BytesIO(); Image.new('RGB', (1240, 1754), 'white').save(image, 'PNG')
+        for index in range(3):
+            status, _, body = self.multipart(f'/api/export/pdf-jobs/{job_id}/pages/{index}',
+                [('file', f'page-{index}.png', 'image/png', image.getvalue())], session=session, method='PUT')
+            self.assertEqual(status, 200, body[:300])
+        status, _, body = self.multipart(f'/api/export/pdf-jobs/{job_id}/complete', [], {'name': 'streamed'}, session=session)
+        self.assertEqual(status, 200, body[:300]); self.assertEqual(len(re.findall(rb'/Type\s*/Page\b', body)), 3)
+        self.assertEqual(self.request(f'/api/export/pdf-jobs/{job_id}', headers={'X-Session-ID': session}, method='DELETE')[0], 404)
 
     def test_invalid_docx_rejected(self):
         status, _, _ = self.multipart('/api/documents/parse', [('file', 'broken.docx', 'application/octet-stream', b'not a zip')])

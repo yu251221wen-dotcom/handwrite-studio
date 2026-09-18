@@ -7,6 +7,7 @@ import { BackgroundManager } from "./background-manager";
 import { DocumentLayoutPanel } from "./document-layout-panel";
 import { FontManager } from "./font-manager";
 import { HandwritingCanvas } from "./handwriting-canvas";
+import { OcrImportPanel } from "./ocr-import-panel";
 import { PageManager } from "./page-manager";
 import { RafSlider } from "./raf-slider";
 import { Button } from "@/components/ui/button";
@@ -24,13 +25,16 @@ import { DEFAULT_RANDOMIZATION, PRESET_NATURALITY } from "@/lib/handwriting/rand
 import { DEFAULT_INK_STYLE, normalizeInkStyle } from "@/lib/handwriting/ink-style";
 import { normalizeCorrectionStyle } from "@/lib/handwriting/correction-style";
 import { deserializeProject, documentBlockFingerprint, documentFingerprint, serializeProject } from "@/lib/handwriting/serialization";
+import { normalizeTableLineStyle } from "@/lib/handwriting/table-line-style";
 import { nextSeed } from "@/lib/handwriting/seeded-random";
-import { DEFAULT_DOCUMENT_LAYOUT_SETTINGS, lineX, lineY, type BackgroundAsset, type CorrectionStyle, type CorrectionType, type DocumentBlock, type FieldMapping, type FontAsset, type HandwritingPreset, type HorizontalLineDetection, type InkStyle, type LineLayout, type PageFooterMode, type ProjectState, type RandomizationConfig } from "@/lib/handwriting/types";
+import { DEFAULT_DOCUMENT_LAYOUT_SETTINGS, lineX, lineY, type BackgroundAsset, type CorrectionStyle, type CorrectionType, type DocumentBlock, type FieldMapping, type FontAsset, type HandwritingPreset, type HorizontalLineDetection, type InkStyle, type LineLayout, type PageFooterMode, type ProjectState, type RandomizationConfig, type TableLineMode } from "@/lib/handwriting/types";
+import { ExportCancelledError, streamPages, type ExportProgress } from "@/lib/export/stream-export";
 import { commitGesture, commitHistory, createHistory, redoHistory, replacePresent, undoHistory } from "@/lib/history/history-store";
 import { validateDocumentCoverage } from "@/lib/layout/coverage";
 import { applyFontToPages, layoutProjectPages } from "@/lib/layout/project-layout";
 import { createApproximateTextMeasurer, createCanvasTextMeasurer } from "@/lib/layout/text-measure";
 import { addBlankPage, deletePageContent, duplicatePage, inspectPageDeletion, movePage } from "@/lib/pages/page-manager";
+import { applyPageSettingsOverride, capturePageSettings } from "@/lib/pages/page-settings-sync";
 import { recordComponentRender, recordInteraction } from "@/lib/performance/performance-monitor";
 
 function demoBlocks(fields: FieldMapping[]): { blocks: DocumentBlock[]; fields: FieldMapping[] } {
@@ -51,7 +55,7 @@ function makeProject(fields = DEMO_INITIAL_FIELDS, name = DEMO_DOCUMENT_NAME, ra
   const font = FONT_SLOTS.find((item) => item.id === fontId) ?? FONT_SLOTS[0];
   const demo = demoBlocks(fields); const documentId = documentFingerprint(demo.fields);
   const base: ProjectState = {
-    schemaVersion: 3, projectVersion: "4.2.1", id: previous?.id ?? "current",
+    schemaVersion: 3, projectVersion: "4.3.0", id: previous?.id ?? "current",
     document: { id: documentId, name, rawTexts, sourceCharacterCount: fields.reduce((sum, field) => sum + Array.from(field.value).length, 0) },
     layoutMode: "no-template", noTemplateMode: previous?.noTemplateMode ?? "preserve-structure",
     templateId: null, documentBlocks: demo.blocks,
@@ -61,6 +65,7 @@ function makeProject(fields = DEMO_INITIAL_FIELDS, name = DEMO_DOCUMENT_NAME, ra
     handwriting: previous?.handwriting ?? { preset: "natural", naturality: PRESET_NATURALITY.natural, randomization: { ...DEFAULT_RANDOMIZATION }, inkColor: "#163d64", fixed: false },
     inkStyle: normalizeInkStyle(previous?.inkStyle, previous?.handwriting.inkColor),
     correctionStyle: normalizeCorrectionStyle(previous?.correctionStyle), footerMode: previous?.footerMode ?? "auto",
+    tableLineMode: previous?.tableLineMode ?? "auto", tableLineStyle: normalizeTableLineStyle(previous?.tableLineStyle),
     exportSettings: previous?.exportSettings ?? { pageSize: "A4", dpi: 300, format: "png", jpgQuality: 0.9 }, updatedAt: new Date().toISOString(),
   };
   return { ...base, pages: layoutProjectPages(base, createApproximateTextMeasurer(), font) };
@@ -70,10 +75,6 @@ function RangeRow({ label, value, display, min, max, step = 1, disabled, onChang
   return <div className="space-y-2"><div className="flex justify-between text-sm"><span className="text-slate-700">{label}</span><span className="tabular-nums text-slate-400">{display}</span></div><RafSlider ariaLabel={label} disabled={disabled} value={value} min={min} max={max} step={step} onPreview={onPreview} onCommit={(next) => { onChange?.(next); onCommit?.(); }} /></div>;
 }
 
-function rawTextsFromDocument(document: { blocks?: DocumentBlock[] }) {
-  return (document.blocks ?? []).map((block) => block.sourceText).filter(Boolean);
-}
-
 function downloadBlob(blob: Blob, name: string) { const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 function canvasBlob(canvas: HTMLCanvasElement, type: string, quality?: number) { return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("导出失败")), type, quality)); }
 const exportImageCache = new Map<string, CanvasImageSource>();
@@ -81,6 +82,10 @@ async function loadExportBackground(asset: BackgroundAsset) {
   if (asset.kind !== "uploaded" || !asset.fileUrl) return undefined;
   const cached = exportImageCache.get(asset.id); if (cached) return cached;
   const bitmap = await createImageBitmap(await apiAssetBlob(asset.fileUrl)); exportImageCache.set(asset.id, bitmap); return bitmap;
+}
+async function loadTransientExportBackground(asset: BackgroundAsset) {
+  if (asset.kind !== "uploaded" || !asset.fileUrl) return undefined;
+  return createImageBitmap(await apiAssetBlob(asset.fileUrl));
 }
 
 export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "document" | "font" | "background" }) {
@@ -103,30 +108,35 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   const [resourceError, setResourceError] = useState("");
   const [detectingLines, setDetectingLines] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
+  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [pageSettingsPreview, setPageSettingsPreview] = useState<ProjectState | null>(null);
   const [saveStatus, setSaveStatus] = useState("未保存");
   const [autosaveKey, setAutosaveKey] = useState("");
   const [autosaveReady, setAutosaveReady] = useState(false);
   const projectInput = useRef<HTMLInputElement>(null);
   const dragBaseline = useRef<ProjectState | null>(null);
   const controlBaseline = useRef<ProjectState | null>(null);
+  const exportAbort = useRef<AbortController | null>(null);
 
-  const allLines = project.pages.flatMap((page) => page.lines);
+  const displayProject = pageSettingsPreview ?? project;
+  const allLines = displayProject.pages.flatMap((page) => page.lines);
   const selected = allLines.find((line) => line.id === selectedId) ?? allLines[0];
-  const currentPage = (project.pages.find((page) => page.pageId === currentPageId) ?? project.pages[0])!;
+  const currentPage = (displayProject.pages.find((page) => page.pageId === currentPageId) ?? displayProject.pages[0])!;
   const currentBackground = backgrounds.find((item) => item.id === currentPage.backgroundId) ?? backgrounds[0];
-  const inkStyle = useMemo(() => normalizeInkStyle(project.inkStyle, project.handwriting.inkColor), [project.inkStyle, project.handwriting.inkColor]);
-  const correctionStyle = useMemo(() => normalizeCorrectionStyle(project.correctionStyle), [project.correctionStyle]);
+  const inkStyle = useMemo(() => normalizeInkStyle(displayProject.inkStyle, displayProject.handwriting.inkColor), [displayProject.inkStyle, displayProject.handwriting.inkColor]);
+  const correctionStyle = useMemo(() => normalizeCorrectionStyle(displayProject.correctionStyle), [displayProject.correctionStyle]);
   const currentSnapDiagnostics = useMemo(() => lineSnapDiagnostics(currentPage), [currentPage]);
-  const activeFontId = selected?.fontId ?? project.selectedFontId;
+  const activeFontId = selected?.fontId ?? displayProject.selectedFontId;
   const font = fonts.find((item) => item.id === activeFontId) ?? fonts[0];
-  const coverage = useMemo(() => validateDocumentCoverage(project.fieldMappings, project.pages, {
-    blocks: project.documentBlocks, ignoredBlockIds: project.explicitlyIgnoredBlockIds,
-  }), [project]);
-  const patientFields = useMemo(() => Object.fromEntries(project.fieldMappings.filter((field) => field.role === "patient").map((field) => [field.id, field.value])), [project.fieldMappings]);
+  const coverage = useMemo(() => validateDocumentCoverage(displayProject.fieldMappings, displayProject.pages, {
+    blocks: displayProject.documentBlocks, ignoredBlockIds: displayProject.explicitlyIgnoredBlockIds,
+  }), [displayProject]);
+  const patientFields = useMemo(() => Object.fromEntries(displayProject.fieldMappings.filter((field) => field.role === "patient").map((field) => [field.id, field.value])), [displayProject.fieldMappings]);
   const fieldTextById = useMemo(() => Object.fromEntries([
-    ...project.fieldMappings.map((field) => [field.id, field.role === "body" ? `${field.label ? `${field.label}：` : ""}${field.value}` : field.value]),
-    ...project.documentBlocks.map((block) => [block.blockId, block.sourceText]),
-  ]), [project.fieldMappings, project.documentBlocks]);
+    ...displayProject.fieldMappings.map((field) => [field.id, field.role === "body" ? `${field.label ? `${field.label}：` : ""}${field.value}` : field.value]),
+    ...displayProject.documentBlocks.map((block) => [block.blockId, block.sourceText]),
+  ]), [displayProject.fieldMappings, displayProject.documentBlocks]);
 
   useEffect(() => {
     Promise.allSettled([apiJson<FontAsset[]>("/api/fonts"), apiJson<BackgroundAsset[]>("/api/backgrounds")])
@@ -161,7 +171,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
     return () => window.clearTimeout(timer);
   }, [project, autosaveKey, autosaveReady]);
 
-  const commit = (next: ProjectState) => { setSaveStatus("未保存"); setHistory((state) => commitHistory(state, { ...next, updatedAt: new Date().toISOString() })); };
+  const commit = (next: ProjectState) => { setPageSettingsPreview(null); setSaveStatus("未保存"); setHistory((state) => commitHistory(state, { ...next, updatedAt: new Date().toISOString() })); };
   const change = (mutator: (state: ProjectState) => ProjectState) => commit(mutator(project));
   const previewControl = (mutator: (state: ProjectState) => ProjectState) => {
     if (!controlBaseline.current) controlBaseline.current = history.present;
@@ -193,13 +203,15 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
     window.addEventListener("keydown", handler); return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const optionsFor = (pageId: string, showLineGuides = false): RenderOptions => {
-    const page = project.pages.find((item) => item.pageId === pageId) ?? project.pages[0];
+  const optionsForProject = (value: ProjectState, pageId: string, showLineGuides = false): RenderOptions => {
+    const page = value.pages.find((item) => item.pageId === pageId) ?? value.pages[0];
     const pageBackground = backgrounds.find((item) => item.id === page.backgroundId) ?? backgrounds[0];
-    return { page, pageCount: project.pages.length, font, fonts, background: pageBackground, handwriting: project.handwriting,
-      inkStyle, correctionStyle, footerMode: project.footerMode ?? "auto",
-      seed: project.seed, documentId: project.document.id, patientFields, fieldTextById, selectedLineId: selectedId, showLineGuides };
+    return { page, pageCount: value.pages.length, font, fonts, background: pageBackground, handwriting: value.handwriting,
+      inkStyle: normalizeInkStyle(value.inkStyle, value.handwriting.inkColor), correctionStyle: normalizeCorrectionStyle(value.correctionStyle), footerMode: value.footerMode ?? "auto",
+      tableLineMode: value.tableLineMode ?? "auto", tableLineStyle: normalizeTableLineStyle(value.tableLineStyle),
+      seed: value.seed, documentId: value.document.id, patientFields, fieldTextById, selectedLineId: selectedId, showLineGuides };
   };
+  const optionsFor = (pageId: string, showLineGuides = false) => optionsForProject(displayProject, pageId, showLineGuides);
 
   const updateLine = (patch: Partial<LineLayout>) => {
     if (!selected) return;
@@ -248,6 +260,17 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
     setCorrectionStyle({ marks: [...correctionStyle.marks, mark] }); setCorrectionTarget(""); setCorrectionReplacement(""); setResourceError("");
   };
 
+  const importBlocks = (fileName: string, blocks: DocumentBlock[], rawCharacterCount?: number) => {
+    const rawTexts = blocks.map((block) => block.sourceText).filter(Boolean);
+    const base: ProjectState = { ...project, layoutMode: "no-template", templateId: null, documentBlocks: blocks,
+      mappedBlockIds: [], unmappedBlockIds: [], explicitlyIgnoredBlockIds: [], fieldMappings: [],
+      document: { id: documentBlockFingerprint(blocks), name: fileName, rawTexts,
+        sourceCharacterCount: rawCharacterCount ?? blocks.reduce((sum, block) => sum + Array.from(block.sourceText.replace(/\s+/gu, "")).length, 0) } };
+    const next = relayout([], base); commit(next); setSelectedId(next.pages[0]?.lines[0]?.id ?? ""); setCurrentPageId(next.pages[0]?.pageId ?? "page-1");
+    const report = validateDocumentCoverage([], next.pages, { blocks, ignoredBlockIds: [] });
+    setParseStatus(`已导入 ${blocks.length} 个 Block · ${next.pages.length} 页 · Missing ${report.missingCharacters}`);
+  };
+
   const uploadDocx = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; if (!file) return;
     setParseStatus("正在本地解析与排版…"); const body = new FormData(); body.append("file", file);
@@ -255,13 +278,7 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
       const response = await apiFetch("/api/documents/parse", { method: "POST", body }); if (!response.ok) throw new Error(String((await response.json() as { detail?: string }).detail ?? "解析失败"));
       const result = await response.json() as { document: { blocks?: DocumentBlock[]; rawCharacterCount?: number; blockCounts?: Record<string, number> } };
       const blocks = result.document.blocks ?? [];
-      const rawTexts = rawTextsFromDocument(result.document);
-      const base: ProjectState = { ...project, layoutMode: "no-template", templateId: null, documentBlocks: blocks,
-        mappedBlockIds: [], unmappedBlockIds: [], explicitlyIgnoredBlockIds: [], fieldMappings: [],
-        document: { id: documentBlockFingerprint(blocks), name: file.name, rawTexts, sourceCharacterCount: result.document.rawCharacterCount ?? blocks.reduce((sum, block) => sum + Array.from(block.sourceText.replace(/\s+/gu, "")).length, 0) } };
-      const next = relayout([], base); commit(next); setSelectedId(next.pages[0]?.lines[0]?.id ?? ""); setCurrentPageId(next.pages[0]?.pageId ?? "page-1");
-      const report = validateDocumentCoverage([], next.pages, { blocks, ignoredBlockIds: [] });
-      setParseStatus(`已解析 ${blocks.length} 个 Block · ${next.pages.length} 页 · Missing ${report.missingCharacters}`);
+      importBlocks(file.name, blocks, result.document.rawCharacterCount);
     } catch (error) { setParseStatus(error instanceof Error ? error.message : "解析服务未启动"); }
     event.target.value = "";
   };
@@ -276,37 +293,57 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
     catch { setParseStatus("项目文件无效"); } event.target.value = "";
   };
   const exportDocument = async () => {
+    if (exportAbort.current) return;
+    if (pageSettingsPreview) { setExportStatus("请先确认或取消全页参数预览，再开始导出。"); return; }
     if (!coverage.valid) { setExportStatus(`内容校验未通过：缺失 ${coverage.missingCharacters} 字，请重新排版后导出。`); return; }
-    setExportStatus("准备高分辨率页面…");
+    const snapshot = project; const controller = new AbortController(); exportAbort.current = controller;
+    setIsExporting(true); setExportProgress({ current: 0, total: snapshot.pages.length, percent: 0, elapsedMs: 0, pageElapsedMs: 0 });
+    setExportStatus("准备高分辨率页面…"); let pdfJobId = ""; const exportCanvas = document.createElement("canvas");
     try {
-      const fontIds = [...new Set([project.selectedFontId, ...project.pages.flatMap((page) => page.lines.map((line) => line.fontId))])];
+      const fontIds = [...new Set([snapshot.selectedFontId, ...snapshot.pages.flatMap((page) => page.lines.map((line) => line.fontId))])];
       const exportFonts = fontIds.map((id) => fonts.find((item) => item.id === id)).filter((item): item is FontAsset => Boolean(item));
       if (exportFonts.length !== fontIds.length) throw new Error("项目引用的字体资源不完整，已阻止静默回退导出");
       await ensureFontsReady(exportFonts);
-      const pixels = A4_PIXELS[project.exportSettings.dpi]; const pageBlobs: Blob[] = [];
-      for (let index = 0; index < project.pages.length; index += 1) {
-        setExportStatus(`正在绘制 ${index + 1} / ${project.pages.length} 页`);
-        const canvas = document.createElement("canvas"); const options = optionsFor(project.pages[index].pageId);
-        options.backgroundImage = await loadExportBackground(options.background);
-        renderCompositeCanvas(canvas, options, pixels.width, pixels.height);
-        pageBlobs.push(await canvasBlob(canvas, project.exportSettings.format === "jpg" ? "image/jpeg" : "image/png", project.exportSettings.jpgQuality));
+      const pixels = A4_PIXELS[snapshot.exportSettings.dpi]; const stem = snapshot.document.name.replace(/\.[^.]+$/, "");
+      if (snapshot.exportSettings.format === "pdf") {
+        const created = await apiJson<{ jobId: string }>("/api/export/pdf-jobs", { method: "POST", signal: controller.signal }); pdfJobId = created.jobId;
       }
-      const stem = project.document.name.replace(/\.[^.]+$/, "");
-      if (project.exportSettings.format === "pdf") {
-        const body = new FormData(); body.append("name", `${stem}-${project.seed}`); pageBlobs.forEach((blob, index) => body.append("files", blob, `page-${index + 1}.png`));
-        const response = await apiFetch("/api/export/pdf", { method: "POST", body }); if (!response.ok) throw new Error(String((await response.json() as { detail?: string }).detail ?? "PDF 导出失败"));
-        downloadBlob(await response.blob(), `${stem}-${project.seed}.pdf`);
-      } else {
-        await Promise.all(pageBlobs.map(async (blob, index) => {
-          const name = `${stem}-${project.seed}-p${index + 1}`;
-          const body = new FormData(); body.append("file", blob, `${name}.${project.exportSettings.format}`);
-          const response = await apiFetch(`/api/exports/${encodeURIComponent(name)}`, { method: "POST", body });
-          if (!response.ok) throw new Error(`第 ${index + 1} 页导出保存失败`);
-          downloadBlob(blob, `${name}.${project.exportSettings.format}`);
-        }));
+      await streamPages({ total: snapshot.pages.length, signal: controller.signal,
+        render: async (index) => {
+          setExportStatus(`正在导出 ${index + 1} / ${snapshot.pages.length} 页 · ${snapshot.exportSettings.dpi} DPI ${snapshot.exportSettings.format.toUpperCase()}`);
+          const options = optionsForProject(snapshot, snapshot.pages[index].pageId); const bitmap = await loadTransientExportBackground(options.background);
+          try {
+            options.backgroundImage = bitmap; renderCompositeCanvas(exportCanvas, options, pixels.width, pixels.height);
+            return await canvasBlob(exportCanvas, snapshot.exportSettings.format === "jpg" ? "image/jpeg" : "image/png", snapshot.exportSettings.jpgQuality);
+          } finally { bitmap?.close(); exportCanvas.width = 1; exportCanvas.height = 1; }
+        },
+        consume: async (blob, index) => {
+          if (snapshot.exportSettings.format === "pdf") {
+            const body = new FormData(); body.append("file", blob, `page-${index + 1}.png`);
+            const response = await apiFetch(`/api/export/pdf-jobs/${pdfJobId}/pages/${index}`, { method: "PUT", body, signal: controller.signal });
+            if (!response.ok) throw new Error(`第 ${index + 1} 页 PDF 暂存失败`);
+          } else {
+            const name = `${stem}-${snapshot.seed}-p${index + 1}`; const body = new FormData(); body.append("file", blob, `${name}.${snapshot.exportSettings.format}`);
+            const response = await apiFetch(`/api/exports/${encodeURIComponent(name)}`, { method: "POST", body, signal: controller.signal });
+            if (!response.ok) throw new Error(`第 ${index + 1} 页导出保存失败`);
+            downloadBlob(blob, `${name}.${snapshot.exportSettings.format}`);
+          }
+        },
+        onProgress: setExportProgress,
+      });
+      if (snapshot.exportSettings.format === "pdf") {
+        const body = new FormData(); body.append("name", `${stem}-${snapshot.seed}`);
+        const response = await apiFetch(`/api/export/pdf-jobs/${pdfJobId}/complete`, { method: "POST", body, signal: controller.signal });
+        if (!response.ok) throw new Error(String((await response.json() as { detail?: string }).detail ?? "PDF 导出失败"));
+        downloadBlob(await response.blob(), `${stem}-${snapshot.seed}.pdf`); pdfJobId = "";
       }
-      setExportStatus(`完成：${project.pages.length} 页 · ${pixels.width}×${pixels.height}`);
-    } catch (error) { setExportStatus(error instanceof Error ? error.message : "导出失败"); }
+      setExportStatus(`完成：${snapshot.pages.length} 页 · ${pixels.width}×${pixels.height}`);
+    } catch (error) {
+      setExportStatus(error instanceof ExportCancelledError || (error as { name?: string }).name === "AbortError" ? "导出已取消，临时资源已释放。" : error instanceof Error ? error.message : "导出失败");
+    } finally {
+      if (pdfJobId) void apiFetch(`/api/export/pdf-jobs/${pdfJobId}`, { method: "DELETE" }).catch(() => undefined);
+      exportCanvas.width = 1; exportCanvas.height = 1; exportAbort.current = null; setIsExporting(false);
+    }
   };
 
   const updateCurrentPage = (patch: Partial<typeof currentPage>) => change((state) => ({ ...state, pages: state.pages.map((page) => page.pageId === currentPage.pageId ? { ...page, ...patch } : page) }));
@@ -347,18 +384,15 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
       backgroundHasNativePageFooter: asset?.hasNativePageFooter ?? false, lineDetection: { ...DEFAULT_LINE_DETECTION } } : hadPaperLayout && page.pageType !== "blank" && page.pageType !== "custom" ? { ...page, lineDetection: { ...DEFAULT_LINE_DETECTION } } : page) };
     if (hadPaperLayout) commitBackgroundRelayout(base); else commit(base);
   };
-  const applyCurrentPaperLayoutToAll = () => {
-    const detection = normalizeLineDetection(currentPage.lineDetection);
-    const base = { ...project, pages: project.pages.map((page) => page.pageType === "blank" || page.pageType === "custom" ? page : {
-      ...page,
-      backgroundId: currentPage.backgroundId,
-      backgroundAdjustments: { ...currentPage.backgroundAdjustments },
-      backgroundTransform: { ...currentPage.backgroundTransform },
-      backgroundHasNativePageFooter: currentPage.backgroundHasNativePageFooter,
-      lineDetection: detection,
-    }) };
-    commitBackgroundRelayout(base);
+  const previewCurrentPaperLayoutToAll = () => {
+    const base = applyPageSettingsOverride(project, capturePageSettings(currentPage));
+    const candidate = relayout(base.fieldMappings, base); setPageSettingsPreview(candidate);
+    setParseStatus("正在预览当前页纸张参数应用到全部页面");
   };
+  const confirmPageSettingsPreview = () => {
+    if (!pageSettingsPreview) return; commit(pageSettingsPreview); setParseStatus("已将纸张参数应用到全部页面 · 可一次撤销");
+  };
+  const cancelPageSettingsPreview = () => { setPageSettingsPreview(null); setParseStatus("已取消全页参数预览，项目未修改"); };
   const detectCurrentBackgroundLines = async () => {
     setDetectingLines(true); setResourceError("");
     try {
@@ -421,8 +455,8 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
   };
   return <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f6f8] text-slate-900">
     <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white/95 px-2 backdrop-blur sm:px-7">
-      <div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#153f49] text-white"><FileText className="size-4.5" /></div><div className="hidden min-w-0 sm:block"><div className="flex items-center gap-2"><h1 className="text-[15px] font-semibold">墨迹排版台 V4.2.1</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost") ? "本地隐私模式" : "在线临时会话"}</span></div><p className="max-w-96 truncate text-xs text-slate-400">{project.document.name} · {project.pages.length} 页 · {project.noTemplateMode === "preserve-structure" ? "保留结构" : "简化正文"} · Seed {project.seed} · {saveStatus}</p></div></div>
-      <div className="flex items-center gap-1.5"><label aria-label="导入 DOCX" className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 xl:hidden"><Upload className="size-4" /><input className="sr-only" type="file" accept=".docx" onChange={uploadDocx} /></label><select aria-label="导出格式" className="h-8 rounded-md border border-slate-200 bg-white px-1 text-[11px] xl:hidden" value={project.exportSettings.format} onChange={(event) => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, format: event.target.value as "png" | "jpg" | "pdf" } }))}><option value="png">PNG</option><option value="jpg">JPG</option><option value="pdf">PDF</option></select><Button className="xl:hidden" variant="ghost" size="icon-sm" disabled={project.handwriting.fixed} onClick={() => change((state) => ({ ...state, seed: nextSeed(state.seed) }))} aria-label="换一种笔迹"><RefreshCw /></Button><Button variant="ghost" size="icon-sm" disabled={!history.past.length} onClick={() => setHistory(undoHistory)} aria-label="撤销"><Undo2 /></Button><Button variant="ghost" size="icon-sm" disabled={!history.future.length} onClick={() => setHistory(redoHistory)} aria-label="重做"><Redo2 /></Button><Button variant="outline" className="hidden rounded-lg md:inline-flex" onClick={saveProject}><Save />保存项目</Button><Button className="rounded-lg bg-[#d96945] text-white hover:bg-[#bf5737]" onClick={exportDocument}><Download />导出 {project.exportSettings.format.toUpperCase()}</Button></div>
+      <div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#153f49] text-white"><FileText className="size-4.5" /></div><div className="hidden min-w-0 sm:block"><div className="flex items-center gap-2"><h1 className="text-[15px] font-semibold">墨迹排版台 V4.3</h1><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost") ? "本地隐私模式" : "在线临时会话"}</span></div><p className="max-w-96 truncate text-xs text-slate-400">{displayProject.document.name} · {displayProject.pages.length} 页 · {displayProject.noTemplateMode === "preserve-structure" ? "保留结构" : "简化正文"} · Seed {displayProject.seed} · {saveStatus}</p></div></div>
+      <div className="flex items-center gap-1.5"><label aria-label="导入 DOCX" className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 xl:hidden"><Upload className="size-4" /><input className="sr-only" type="file" accept=".docx" onChange={uploadDocx} /></label><select aria-label="导出格式" className="h-8 rounded-md border border-slate-200 bg-white px-1 text-[11px] xl:hidden" value={project.exportSettings.format} onChange={(event) => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, format: event.target.value as "png" | "jpg" | "pdf" } }))}><option value="png">PNG</option><option value="jpg">JPG</option><option value="pdf">PDF</option></select><Button className="xl:hidden" variant="ghost" size="icon-sm" disabled={project.handwriting.fixed} onClick={() => change((state) => ({ ...state, seed: nextSeed(state.seed) }))} aria-label="换一种笔迹"><RefreshCw /></Button><Button variant="ghost" size="icon-sm" disabled={!history.past.length || Boolean(pageSettingsPreview)} onClick={() => setHistory(undoHistory)} aria-label="撤销"><Undo2 /></Button><Button variant="ghost" size="icon-sm" disabled={!history.future.length || Boolean(pageSettingsPreview)} onClick={() => setHistory(redoHistory)} aria-label="重做"><Redo2 /></Button><Button variant="outline" className="hidden rounded-lg md:inline-flex" onClick={saveProject}><Save />保存项目</Button>{isExporting && <Button variant="outline" onClick={() => exportAbort.current?.abort()}>取消导出</Button>}<Button disabled={isExporting} className="rounded-lg bg-[#d96945] text-white hover:bg-[#bf5737]" onClick={exportDocument}><Download />{isExporting ? "导出中…" : `导出 ${project.exportSettings.format.toUpperCase()}`}</Button></div>
     </header>
 
     <div className="sticky top-16 z-20 flex h-11 shrink-0 items-center gap-2 border-b border-slate-200 bg-white/95 px-4 text-xs backdrop-blur xl:hidden">
@@ -435,16 +469,17 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
         <TabsList className="grid h-auto w-full grid-cols-3"><TabsTrigger value="document">文档</TabsTrigger><TabsTrigger value="font">字体</TabsTrigger><TabsTrigger value="background">背景</TabsTrigger></TabsList>
         <TabsContent value="document" className="mt-5 space-y-5">
           <div><div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold">输入内容</h2><span className="text-xs text-[#287e86]">{parseStatus}</span></div><label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 hover:border-[#287e86]"><span className="grid size-9 place-items-center rounded-lg bg-white text-[#287e86] shadow-sm"><Upload className="size-4" /></span><span><strong className="block text-sm font-medium">替换文档</strong><small className="text-xs text-slate-400">支持 DOCX · 自动分页</small></span><input className="sr-only" type="file" accept=".docx" onChange={uploadDocx} /></label></div>
+          <OcrImportPanel onConfirm={importBlocks} />
           <DocumentLayoutPanel noTemplateMode={project.noTemplateMode} settings={project.documentLayoutSettings} onNoTemplateMode={setNoTemplateMode} onSettings={setLayoutSettings} />
           <div className="grid grid-cols-2 gap-2"><Button variant="outline" size="sm" onClick={saveProject}><FileJson />保存 JSON</Button><Button variant="outline" size="sm" onClick={() => projectInput.current?.click()}><Upload />打开项目</Button><input ref={projectInput} className="sr-only" type="file" accept=".json,.handwrite.json" onChange={openProject} /></div>
           <div className="rounded-xl border border-[#cce4e2] bg-[#eff9f8] p-3 text-xs leading-5 text-[#356b6c]"><div className="mb-1 flex items-center gap-2 font-semibold"><Sparkles className="size-3.5" />Block 完整性检查</div><div className="grid grid-cols-2 gap-x-3"><span>Raw {coverage.rawCharacters}</span><span>Recognized {coverage.recognizedCharacters}</span><span>Laid out {coverage.laidOutCharacterCount}</span><span>Ignored {coverage.explicitlyIgnoredCharacters}</span></div><strong className={coverage.valid ? "text-emerald-700" : "text-rose-700"}>Missing {coverage.missingCharacters}</strong></div>
-          <PageManager pages={project.pages} currentPageId={currentPage.pageId} onSelect={setCurrentPageId} onAdd={addPage} onDuplicate={copyPage} onMove={reorderPage} onDelete={deletePage} />
+          <PageManager pages={displayProject.pages} currentPageId={currentPage.pageId} onSelect={setCurrentPageId} onAdd={addPage} onDuplicate={copyPage} onMove={reorderPage} onDelete={deletePage} />
         </TabsContent>
         <TabsContent value="font" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<FontManager fonts={fonts} selectedId={activeFontId} onSelect={(id) => selectFont(id)} onUploaded={(asset) => { setFonts((items) => [asset, ...items.filter((item) => item.id !== asset.id)]); selectFont(asset.id, asset); setResourceError(""); }} /></TabsContent>
-        <TabsContent value="background" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<BackgroundManager backgrounds={backgrounds} selectedId={currentPage.backgroundId} adjustments={currentPage.backgroundAdjustments} transform={currentPage.backgroundTransform} lineDetection={normalizeLineDetection(currentPage.lineDetection)} snapDiagnostics={currentSnapDiagnostics} detecting={detectingLines} onSelect={selectBackground} onAdjust={(backgroundAdjustments) => updateCurrentPage({ backgroundAdjustments })} onTransform={(backgroundTransform) => updateCurrentPage({ backgroundTransform })} onLineDetection={updateLineDetection} onDetectLines={() => void detectCurrentBackgroundLines()} onApplySuggestedLayout={(bodyFontSize, lineHeight) => setLayoutSettings({ ...project.documentLayoutSettings, bodyFontSize, lineHeight })} onApplyToAll={applyCurrentPaperLayoutToAll} onUploaded={(asset) => { setBackgrounds((items) => [asset, ...items.filter((item) => item.id !== asset.id)]); selectBackground(asset.id); }} /></TabsContent>
+        <TabsContent value="background" className="mt-5">{resourceError && <p role="alert" className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{resourceError}</p>}<BackgroundManager backgrounds={backgrounds} selectedId={currentPage.backgroundId} adjustments={currentPage.backgroundAdjustments} transform={currentPage.backgroundTransform} lineDetection={normalizeLineDetection(currentPage.lineDetection)} snapDiagnostics={currentSnapDiagnostics} detecting={detectingLines} previewingAll={Boolean(pageSettingsPreview)} onSelect={selectBackground} onAdjust={(backgroundAdjustments) => updateCurrentPage({ backgroundAdjustments })} onTransform={(backgroundTransform) => updateCurrentPage({ backgroundTransform })} onLineDetection={updateLineDetection} onDetectLines={() => void detectCurrentBackgroundLines()} onApplySuggestedLayout={(bodyFontSize, lineHeight) => setLayoutSettings({ ...project.documentLayoutSettings, bodyFontSize, lineHeight })} onPreviewAll={previewCurrentPaperLayoutToAll} onConfirmAll={confirmPageSettingsPreview} onCancelAll={cancelPageSettingsPreview} onUploaded={(asset) => { setBackgrounds((items) => [asset, ...items.filter((item) => item.id !== asset.id)]); selectBackground(asset.id); }} /></TabsContent>
       </Tabs></aside>
 
-      <section className="flex min-h-0 flex-col overflow-hidden bg-[#e7ecef]"><div className="sticky top-0 z-10 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white/80 px-5 text-xs text-slate-500"><span className="flex items-center gap-2"><Grid3X3 className="size-4" />多页 Canvas · 当前第 {currentPage.pageIndex + 1} 页</span><span className="flex items-center gap-2"><Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.max(0.5, value - 0.08))}><Minus /></Button>{Math.round(zoom * 100)}%<Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.min(1.2, value + 0.08))}><Plus /></Button></span></div><div className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center gap-8 overflow-auto p-8 sm:p-12">{project.pages.map((page, pageIndex) => Math.abs(pageIndex - currentPage.pageIndex) <= 1 ? <HandwritingCanvas key={page.pageId} options={optionsFor(page.pageId, true)} zoom={zoom} active={page.pageId === currentPage.pageId} onActivate={() => setCurrentPageId(page.pageId)} onSelectLine={selectLine} onChangeLines={(lines, phase) => onDragLines(page.pageId, lines, phase)} onRenderError={setResourceError} /> : <button key={page.pageId} aria-label={`载入第 ${page.pageIndex + 1} 页`} onClick={() => setCurrentPageId(page.pageId)} className="shrink-0 bg-white shadow-[0_12px_44px_rgb(27_50_56/12%)]" style={{ width: PAGE_WIDTH * zoom, height: PAGE_HEIGHT * zoom }} />)}</div></section>
+      <section className="flex min-h-0 flex-col overflow-hidden bg-[#e7ecef]"><div className="sticky top-0 z-10 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white/80 px-5 text-xs text-slate-500"><span className="flex items-center gap-2"><Grid3X3 className="size-4" />多页 Canvas · 当前第 {currentPage.pageIndex + 1} 页{pageSettingsPreview ? " · 全页参数预览" : ""}</span><span className="flex items-center gap-2"><Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.max(0.5, value - 0.08))}><Minus /></Button>{Math.round(zoom * 100)}%<Button variant="ghost" size="icon-sm" onClick={() => setZoom((value) => Math.min(1.2, value + 0.08))}><Plus /></Button></span></div><div className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center gap-8 overflow-auto p-8 sm:p-12">{displayProject.pages.map((page, pageIndex) => Math.abs(pageIndex - currentPage.pageIndex) <= 1 ? <HandwritingCanvas key={page.pageId} options={optionsFor(page.pageId, true)} zoom={zoom} active={page.pageId === currentPage.pageId} onActivate={() => setCurrentPageId(page.pageId)} onSelectLine={selectLine} onChangeLines={(lines, phase) => { if (!pageSettingsPreview) onDragLines(page.pageId, lines, phase); }} onRenderError={setResourceError} /> : <button key={page.pageId} aria-label={`载入第 ${page.pageIndex + 1} 页`} onClick={() => setCurrentPageId(page.pageId)} className="shrink-0 bg-white shadow-[0_12px_44px_rgb(27_50_56/12%)]" style={{ width: PAGE_WIDTH * zoom, height: PAGE_HEIGHT * zoom }} />)}</div></section>
 
       <aside className="min-h-0 overflow-y-auto border-l border-slate-200 bg-white px-5 py-5 max-xl:hidden">{selected ? <>
         <div className="mb-5 flex items-center justify-between"><div><h2 className="text-sm font-semibold">当前行参数</h2><p className="mt-0.5 text-xs text-slate-400">自动坐标 + 手动偏移 · 字符状态稳定</p></div><Switch checked={selected.locked} onCheckedChange={(locked) => updateLine({ locked })} aria-label="锁定当前行" /></div>
@@ -475,7 +510,8 @@ export function EditorWorkspace({ initialTab = "document" }: { initialTab?: "doc
           {correctionStyle.marks.filter((mark) => mark.blockId === (selected.blockId ?? selected.fieldId)).map((mark) => <div key={mark.id} className="flex items-center justify-between rounded-md bg-slate-50 px-2 py-1 text-xs"><span className="truncate">{mark.sourceText} · {mark.type}</span><button className="text-rose-600" onClick={() => setCorrectionStyle({ marks: correctionStyle.marks.filter((item) => item.id !== mark.id) })}>移除</button></div>)}
         </CollapsibleContent></Collapsible>
         <div className="mt-4 space-y-3 border-t border-slate-100 pt-4"><h3 className="text-sm font-semibold">纸张页码</h3><select aria-label="页码模式" value={project.footerMode ?? "auto"} onChange={(event) => change((state) => ({ ...state, footerMode: event.target.value as PageFooterMode }))} className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm"><option value="auto">自动（按背景标记）</option><option value="native">使用纸张原生页码</option><option value="generated">生成居中页码</option><option value="hidden">隐藏页码</option></select><div className="flex items-center justify-between text-sm"><span>当前背景自带页码</span><Switch checked={currentPage.backgroundHasNativePageFooter ?? currentBackground.hasNativePageFooter ?? false} onCheckedChange={(backgroundHasNativePageFooter) => updateCurrentPage({ backgroundHasNativePageFooter })} aria-label="背景自带页码" /></div></div>
-        <div className="mt-5 space-y-3 border-t border-slate-100 pt-4"><h3 className="text-sm font-semibold">导出设置</h3><div className="grid grid-cols-3 gap-1">{([150, 300, 600] as const).map((dpi) => <Button key={dpi} size="sm" variant={project.exportSettings.dpi === dpi ? "default" : "outline"} onClick={() => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, dpi } }))}>{dpi} DPI</Button>)}</div><div className="grid grid-cols-3 gap-1">{(["png", "jpg", "pdf"] as const).map((format) => <Button key={format} size="sm" variant={project.exportSettings.format === format ? "default" : "outline"} onClick={() => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, format } }))}>{format.toUpperCase()}</Button>)}</div>{project.exportSettings.format === "jpg" && <RangeRow label="JPG 质量" value={Math.round(project.exportSettings.jpgQuality * 100)} display={`${Math.round(project.exportSettings.jpgQuality * 100)}%`} min={40} max={100} onChange={(quality) => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, jpgQuality: quality / 100 } }))} />}<p className="text-xs leading-5 text-slate-400">{exportStatus || `默认 300 DPI：${A4_PIXELS[300].width}×${A4_PIXELS[300].height}`}</p></div>
+        <div className="mt-4 space-y-3 border-t border-slate-100 pt-4"><h3 className="text-sm font-semibold">表格线</h3><select aria-label="表格线模式" value={project.tableLineMode ?? "auto"} onChange={(event) => change((state) => ({ ...state, tableLineMode: event.target.value as TableLineMode }))} className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm"><option value="auto">自动</option><option value="hidden">隐藏</option><option value="adaptive">自适应</option><option value="visible">显示</option></select>{project.tableLineMode === "visible" && <div className="space-y-3"><label className="flex items-center justify-between text-xs text-slate-500">线条颜色<input aria-label="表格线颜色" type="color" value={normalizeTableLineStyle(project.tableLineStyle).color} onChange={(event) => change((state) => ({ ...state, tableLineStyle: { ...normalizeTableLineStyle(state.tableLineStyle), color: event.target.value } }))} /></label><RangeRow label="透明度" value={normalizeTableLineStyle(project.tableLineStyle).alpha * 100} display={`${Math.round(normalizeTableLineStyle(project.tableLineStyle).alpha * 100)}%`} min={5} max={80} onChange={(value) => change((state) => ({ ...state, tableLineStyle: { ...normalizeTableLineStyle(state.tableLineStyle), alpha: value / 100 } }))} /><RangeRow label="线宽" value={normalizeTableLineStyle(project.tableLineStyle).width * 10} display={`${normalizeTableLineStyle(project.tableLineStyle).width.toFixed(1)} px`} min={2} max={20} onChange={(value) => change((state) => ({ ...state, tableLineStyle: { ...normalizeTableLineStyle(state.tableLineStyle), width: value / 10 } }))} /></div>}</div>
+        <div className="mt-5 space-y-3 border-t border-slate-100 pt-4"><h3 className="text-sm font-semibold">导出设置</h3><div className="grid grid-cols-3 gap-1">{([150, 300, 600] as const).map((dpi) => <Button disabled={isExporting} key={dpi} size="sm" variant={project.exportSettings.dpi === dpi ? "default" : "outline"} onClick={() => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, dpi } }))}>{dpi} DPI</Button>)}</div><div className="grid grid-cols-3 gap-1">{(["png", "jpg", "pdf"] as const).map((format) => <Button disabled={isExporting} key={format} size="sm" variant={project.exportSettings.format === format ? "default" : "outline"} onClick={() => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, format } }))}>{format.toUpperCase()}</Button>)}</div>{project.exportSettings.format === "jpg" && <RangeRow disabled={isExporting} label="JPG 质量" value={Math.round(project.exportSettings.jpgQuality * 100)} display={`${Math.round(project.exportSettings.jpgQuality * 100)}%`} min={40} max={100} onChange={(quality) => change((state) => ({ ...state, exportSettings: { ...state.exportSettings, jpgQuality: quality / 100 } }))} />}{project.exportSettings.dpi === 600 && project.pages.length > 1 && <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-700">600 DPI 多页导出需要更多时间和内存，将逐页生成。</p>}{exportProgress && <div className="space-y-1"><div className="flex justify-between text-xs text-slate-500"><span>{exportProgress.current} / {exportProgress.total} 页</span><span>{exportProgress.percent}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-[#d96945]" style={{ width: `${exportProgress.percent}%` }} /></div></div>}{isExporting && <Button size="sm" variant="outline" className="w-full" onClick={() => exportAbort.current?.abort()}>取消导出并释放资源</Button>}<p className="text-xs leading-5 text-slate-400">{exportStatus || `默认 300 DPI：${A4_PIXELS[300].width}×${A4_PIXELS[300].height}`}</p></div>
       </> : <p className="text-sm text-slate-400">暂无可编辑行</p>}</aside>
     </div>
   </main>;

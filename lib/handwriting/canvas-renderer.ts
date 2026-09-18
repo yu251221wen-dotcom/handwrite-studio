@@ -3,7 +3,9 @@ import { assertFontReady, fontCssFamily } from "./font-library.ts";
 import { generateCharacterStates } from "./randomization.ts";
 import { automaticCorrectionMarks, correctionMarksByBlock, normalizeCorrectionStyle } from "./correction-style.ts";
 import { generateInkStates, normalizeInkStyle } from "./ink-style.ts";
-import { lineX, lineY, type BackgroundAsset, type CorrectionMark, type CorrectionStyle, type FontAsset, type HandwritingStyle, type InkStyle, type LineLayout, type PageFooterMode, type PageState } from "./types.ts";
+import { naturalizeRomanGlyph, romanNumeralCharacterIndexes } from "./roman-numerals.ts";
+import { normalizeTableLineStyle, resolveTableLines } from "./table-line-style.ts";
+import { lineX, lineY, type BackgroundAsset, type CorrectionMark, type CorrectionStyle, type FontAsset, type HandwritingStyle, type InkStyle, type LineLayout, type PageFooterMode, type PageState, type TableLineMode, type TableLineStyle } from "./types.ts";
 import { monotonicNow, recordRenderTiming } from "../performance/performance-monitor.ts";
 
 export const PAGE_WIDTH = 595;
@@ -21,6 +23,8 @@ export interface RenderOptions {
   inkStyle?: InkStyle;
   correctionStyle?: CorrectionStyle;
   footerMode?: PageFooterMode;
+  tableLineMode?: TableLineMode;
+  tableLineStyle?: TableLineStyle;
   seed: string;
   documentId: string;
   patientFields?: Record<string, string>;
@@ -225,10 +229,18 @@ export function renderTextLayer(context: CanvasRenderingContext2D, options: Rend
     let cursor = 0; let columnIndex = 0; const x = lineX(line); const y = lineY(line);
     context.save(); context.translate(x, y); context.rotate(line.rotation * Math.PI / 180);
     if (line.visualKind === "table" && line.columnWidths?.length) {
-      context.save(); context.strokeStyle = "rgba(73,91,101,.28)"; context.lineWidth = 0.75;
-      let edge = 0; const top = -line.fontSize - 8; const height = line.lineHeight;
-      for (const width of line.columnWidths) { context.strokeRect(edge, top, width, height); edge += width; }
-      context.restore();
+      const tableLines = resolveTableLines(options.tableLineMode, options.page, options.background);
+      if (tableLines !== "none") {
+        const style = normalizeTableLineStyle(options.tableLineStyle);
+        context.save(); context.strokeStyle = style.color; context.globalAlpha = style.alpha; context.lineWidth = style.width;
+        const total = line.columnWidths.reduce((sum, width) => sum + width, 0); const top = -line.fontSize - 8; const height = line.lineHeight;
+        if (tableLines === "grid") {
+          let edge = 0; for (const width of line.columnWidths) { context.strokeRect(edge, top, width, height); edge += width; }
+        } else {
+          context.beginPath(); context.moveTo(0, top + height); context.lineTo(total, top + height); context.stroke();
+        }
+        context.restore();
+      }
     }
     const advances = states.map((state) => {
       if (state.character === "\t") return 0;
@@ -244,8 +256,11 @@ export function renderTextLayer(context: CanvasRenderingContext2D, options: Rend
       return Math.min(1, Math.max(0.7, (width - 14) / Math.max(1, total)));
     });
     const glyphs: RenderedGlyph[] = [];
+    const romanIndexes = romanNumeralCharacterIndexes(line.text);
     for (let stateIndex = 0; stateIndex < states.length; stateIndex += 1) {
-      const state = states[stateIndex];
+      const rawState = states[stateIndex];
+      const sourceIndex = line.sourceCharacterIndices?.[stateIndex] ?? line.startIndex + stateIndex;
+      const state = romanIndexes.has(stateIndex) ? naturalizeRomanGlyph(rawState, line, sourceIndex, options.seed, options.documentId) : rawState;
       if (state.character === "\t" && line.columnWidths?.length) {
         cursor = line.columnWidths.slice(0, Math.min(++columnIndex, line.columnWidths.length)).reduce((sum, width) => sum + width, 0) + 8;
         continue;
@@ -255,7 +270,6 @@ export function renderTextLayer(context: CanvasRenderingContext2D, options: Rend
       const measured = context.measureText(state.character).width;
       const columnScale = columnScales?.[columnIndex] ?? 1;
       const inkState = inkStates[stateIndex];
-      const sourceIndex = line.sourceCharacterIndices?.[stateIndex] ?? line.startIndex + stateIndex;
       const glyphX = cursor + state.offsetX;
       context.save(); context.translate(glyphX, state.offsetY + state.baselineOffset);
       const columnWidth = line.columnWidths?.[columnIndex];
@@ -311,4 +325,5 @@ export function renderCompositeCanvas(canvas: HTMLCanvasElement, options: Render
   textContext.setTransform(widthPx / PAGE_WIDTH, 0, 0, heightPx / PAGE_HEIGHT, 0, 0);
   renderTextLayer(textContext, { ...exportOptions, isolatedTextLayer: true }, true);
   context.setTransform(1, 0, 0, 1, 0, 0); context.drawImage(textCanvas, 0, 0);
+  textCanvas.width = 1; textCanvas.height = 1;
 }

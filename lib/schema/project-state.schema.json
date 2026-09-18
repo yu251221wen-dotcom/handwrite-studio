@@ -38,6 +38,17 @@
     "inkStyle": { "$ref": "#/$defs/inkStyle" },
     "correctionStyle": { "$ref": "#/$defs/correctionStyle" },
     "footerMode": { "enum": ["auto", "native", "generated", "hidden"] },
+    "tableLineMode": { "enum": ["auto", "hidden", "adaptive", "visible"] },
+    "tableLineStyle": {
+      "type": "object",
+      "required": ["color", "alpha", "width"],
+      "properties": {
+        "color": { "type": "string" },
+        "alpha": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "minimum": 0.1, "maximum": 4 }
+      },
+      "additionalProperties": false
+    },
     "exportSettings": { "type": "object" },
     "updatedAt": { "type": "string" }
   },

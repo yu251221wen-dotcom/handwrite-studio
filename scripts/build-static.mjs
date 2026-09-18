@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import "./prepare-ocr-assets.mjs";
 
 const nextCli = fileURLToPath(
   new URL("../node_modules/next/dist/bin/next", import.meta.url),

@@ -7,13 +7,16 @@ from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Request, U
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from PIL import Image
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen.canvas import Canvas
 
 from server.config import settings
 from server.modules.document_parser import DocxParseError, parse_docx
 from server.resource_store import ResourceError, ResourceStore
 from server.session_store import InvalidSession, SessionStore
 
-VERSION = "4.2.1"
+VERSION = "4.3.0"
 FONT_LIMIT_BYTES = min(settings.max_upload_bytes, 32 * 1024 * 1024)
 BACKGROUND_LIMIT_BYTES = min(settings.max_upload_bytes, 25 * 1024 * 1024)
 sessions = SessionStore(settings.upload_dir, settings.temp_file_ttl_hours)
@@ -183,6 +186,53 @@ async def export_pdf(name: str = Form("handwrite"), files: list[UploadFile] = Fi
     images[0].save(output, format="PDF", save_all=True, append_images=images[1:], resolution=images[0].width / (210 / 25.4))
     content = output.getvalue(); store.save_binary_export(name, content, "pdf")
     return Response(content, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=handwrite.pdf; filename*=UTF-8''{quote(name, safe='')}.pdf"})
+
+
+@app.post("/api/export/pdf-jobs")
+def create_pdf_job(x_session_id: str | None = Header(None)) -> dict[str, str]:
+    return {"jobId": _store(x_session_id).create_export_job()}
+
+
+@app.put("/api/export/pdf-jobs/{job_id}/pages/{page_index}")
+async def upload_pdf_job_page(job_id: str, page_index: int, file: UploadFile = File(...), x_session_id: str | None = Header(None)) -> dict[str, int | str]:
+    store = _store(x_session_id)
+    content = await file.read(BACKGROUND_LIMIT_BYTES + 1)
+    if len(content) > BACKGROUND_LIMIT_BYTES:
+        raise HTTPException(status_code=413, detail="PDF 页面过大")
+    try:
+        store.save_export_job_page(job_id, page_index, content)
+    except ResourceError as error:
+        raise _http_error(error) from error
+    return {"status": "saved", "pageIndex": page_index}
+
+
+@app.post("/api/export/pdf-jobs/{job_id}/complete")
+def complete_pdf_job(job_id: str, name: str = Form("handwrite"), x_session_id: str | None = Header(None)) -> Response:
+    store = _store(x_session_id)
+    try:
+        pages = store.export_job_pages(job_id)
+        if not pages:
+            raise ResourceError("导出任务没有页面")
+        output = BytesIO(); pdf = Canvas(output, pagesize=A4, pageCompression=1)
+        for path in pages:
+            with Image.open(path) as image:
+                image.verify()
+            pdf.drawImage(ImageReader(str(path)), 0, 0, width=A4[0], height=A4[1], preserveAspectRatio=False)
+            pdf.showPage()
+        pdf.save(); content = output.getvalue(); store.save_binary_export(name, content, "pdf")
+        store.cancel_export_job(job_id)
+        return Response(content, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=handwrite.pdf; filename*=UTF-8''{quote(name, safe='')}.pdf"})
+    except ResourceError as error:
+        raise _http_error(error) from error
+
+
+@app.delete("/api/export/pdf-jobs/{job_id}")
+def cancel_pdf_job(job_id: str, x_session_id: str | None = Header(None)) -> dict[str, str]:
+    try:
+        _store(x_session_id).cancel_export_job(job_id)
+    except ResourceError as error:
+        raise _http_error(error, 404) from error
+    return {"status": "cancelled"}
 
 
 @app.post("/api/exports/{name}")

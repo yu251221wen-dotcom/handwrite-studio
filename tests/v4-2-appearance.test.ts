@@ -122,7 +122,7 @@ test("Schema V3 serialization adds and preserves V4.2 appearance settings withou
     documentLayoutSettings: DEFAULT_DOCUMENT_LAYOUT_SETTINGS, seed: "1001", selectedFontId: FONT_SLOTS[0].id, fieldMappings: [], pages: [options.page], handwriting,
     exportSettings: { pageSize: "A4", dpi: 300, format: "png", jpgQuality: .9 }, updatedAt: "" };
   const upgraded = deserializeProject(JSON.stringify(state));
-  assert.equal(upgraded.projectVersion, "4.2.1"); assert.equal(upgraded.footerMode, "auto");
+  assert.equal(upgraded.projectVersion, "4.3.0"); assert.equal(upgraded.footerMode, "auto");
   assert.deepEqual(upgraded.inkStyle, { ...DEFAULT_INK_STYLE, color: handwriting.inkColor });
   const restored = deserializeProject(serializeProject({ ...upgraded, footerMode: "native",
     correctionStyle: { enabled: true, automatic: false, automaticProbability: 0, marks: [{ id: "m", blockId: "b", sourceStart: 1, sourceEnd: 2, sourceText: "甲", type: "single-strike" }] } }));

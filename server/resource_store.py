@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
+import shutil
 from typing import Any
 from uuid import uuid4
 
@@ -18,7 +19,8 @@ class ResourceStore:
         self.background_dir = self.root / "backgrounds"
         self.project_dir = self.root / "projects"
         self.export_dir = self.root / "exports"
-        for directory in (self.font_dir, self.background_dir, self.project_dir, self.export_dir):
+        self.export_job_dir = self.export_dir / "jobs"
+        for directory in (self.font_dir, self.background_dir, self.project_dir, self.export_dir, self.export_job_dir):
             directory.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
@@ -123,3 +125,30 @@ class ResourceStore:
         path = self.export_dir / f"{safe_name}.{extension}"
         path.write_bytes(content)
         return path
+
+    def create_export_job(self) -> str:
+        job_id = uuid4().hex
+        (self.export_job_dir / job_id).mkdir(parents=True)
+        return job_id
+
+    def export_job_path(self, job_id: str) -> Path:
+        if not re.fullmatch(r"[a-f0-9]{32}", job_id):
+            raise ResourceError("导出任务 ID 无效")
+        path = (self.export_job_dir / job_id).resolve()
+        if self.export_job_dir.resolve() not in path.parents or not path.exists():
+            raise ResourceError("导出任务不存在")
+        return path
+
+    def save_export_job_page(self, job_id: str, page_index: int, content: bytes) -> Path:
+        if page_index < 0 or page_index > 9999 or not content.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ResourceError("PDF 页面无效")
+        path = self.export_job_path(job_id) / f"page-{page_index:04d}.png"
+        path.write_bytes(content)
+        return path
+
+    def export_job_pages(self, job_id: str) -> list[Path]:
+        return sorted(self.export_job_path(job_id).glob("page-*.png"))
+
+    def cancel_export_job(self, job_id: str) -> None:
+        path = self.export_job_path(job_id)
+        shutil.rmtree(path)

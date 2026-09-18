@@ -8,7 +8,7 @@
 
 ## 当前版本
 
-- Version：4.2.1（V4.2.1，本地与公网验收完成）
+- Version：4.3.0（V4.3，本地验收完成，等待公网发布复验）
 - SchemaVersion：3
 - 更新日期：2026-09-18
 - GitHub：`https://github.com/yu251221wen-dotcom/handwrite-studio`
@@ -88,6 +88,15 @@
 - [x] 分页槽位诊断与可拆分正文页尾压实
 - [x] 连续签名两槽成组、标题 widow、处方四列末槽规则
 - [x] 页面间 `continuation` 标签移除
+- [x] 全页纸张参数临时预览、翻页检查、确认/取消与单次 Undo
+- [x] 全页同步不覆盖单行 manualOffset、Correction 或正文修改
+- [x] PNG/JPG/PDF 单页流式高 DPI 导出、进度、取消与逐页资源释放
+- [x] Session 隔离的 PDF export job 与逐页 A4 合成
+- [x] OCR Lite：PNG/JPG/扫描 PDF 本地识别、校对、置信度与重新识别
+- [x] OCR 文本统一转换为 DocumentBlock 并进入现有 layout/coverage/export 链路
+- [x] Roman numeral 稳定 Seed 自然化并继承字体与 InkStyle
+- [x] tableLineMode：auto / hidden / adaptive / visible
+- [x] 显式表格线颜色、透明度、线宽保存恢复
 - [x] 可写纸线耗尽后自动分页；不再在检测范围外虚构纸线
 - [x] character-level handwriting
 - [x] deterministic Seed
@@ -121,39 +130,44 @@
 
 ## 当前未完成
 
-- 透视校正
-- OCR
+- 透视与倾斜校正
+- 手写字 OCR、复杂多栏/表格 OCR 重建
 - SVG Path / 笔画级字形扰动（本轮仅做 Canvas 墨迹外观层）
 
 ---
 
 ## 当前最高优先级
 
-当前阶段：V4.2.1 已完成本地、GitHub `main`、Railway 与 Cloudflare Pages 公网验收；本轮不启动 V4.3
+当前阶段：V4.3 本地实现与回归完成，待推送 GitHub `main` 并复验 Railway / Cloudflare Pages。
 
 1. Cloudflare Pages 正式前端保持可用
 2. 保持 Session isolation、精确 CORS 和 `/health`
 3. 保持 Golden Test Missing = 0
 4. 保持 `autoY + lineSnapOffset + manualOffsetY`、纸线槽位唯一分配和 Seed 稳定性
-5. 不提前开发 OCR、透视或 AI 字形
+5. 不进入透视、复杂 OCR、AI 字段映射或 AI 字形
 
 ---
 
 ## 下一阶段
 
-下一阶段仅建议 **V4.3 Real-case Polish**：继续用真实但不公开的本地样本做处方、签名、复杂页尾和墨迹参数微调。透视、OCR、AI 字段匹配和 AI 字迹继续暂缓。
+下一阶段只建议 **V4.4 Final / Clean-room / ZIP / Release**。透视、复杂 OCR、AI 字段匹配和 AI 字迹继续暂缓，除非用户另行明确决定。
 
 ---
 
 ## 最近测试结果
 
-- TypeScript：51 / 51 通过
-- Python：16 / 16 通过
+- TypeScript：56 / 56 通过
+- Python：17 / 17 通过
 - Typecheck：通过
 - ESLint：0 error
 - Build：Vinext production build 通过
 - Cloudflare Pages 静态导出：通过；4 个正式路由均生成到 `out/`
-- FastAPI health：本地与公网均通过，`status=ok`、`version=4.2.1`
+- FastAPI health：本地通过，`status=ok`、`version=4.3.0`；公网待本轮发布
+- V4.3 全页同步：临时预览不修改输入状态；确认批量只增加一个 history entry；一次 Undo 恢复；manualOffset 与 Correction 保留
+- V4.3 导出：本地浏览器真实导出 8 页、300 DPI PDF；UI 显示 8/8、100%，后端确认 8 页逐页上传并完成合成；单测覆盖逐页释放和中途取消
+- V4.3 OCR：合成 PNG 置信度 88%、JPG 87%、1 页扫描 PDF 85%；三者均使用锁定的简体中文模型，扫描 PDF 由 PDF.js 渲染后识别
+- V4.3 Roman numeral：II / III / IV / V 共享同一手写链路；同 Seed 可复现、不同来源位置有细微差异
+- V4.3 表格线：四种模式解析测试通过；结构化纸张 auto/adaptive 不重复叠线，hidden 保留表格结构，visible 保存样式
 - Golden Test：Raw 3657 / Laid out 3657 / Missing 0；实际 Canvas `fillText` 覆盖率通过
 - 公网 DOCX：合成长文档 Raw 3097 / Laid out 3097 / Missing 0，DocumentBlock 5，自动排版 7 页
 - 横线检测：标准/噪声/粗线双边缘合并单测通过；纯白背景不会误启用吸附
@@ -187,7 +201,7 @@
 - Cloudflare Pages：4 个正式路由 `/`、`/font-library/`、`/background-library/`、`/showcase/` 均为 HTTP 200
 - Clean-room：V3.0 最近一次通过；V4.1 尚未重新打包和执行 clean-room
 
-V4.2.1 完整源码测试、本地验收和公网验收均已通过。正式 ZIP 与 clean-room 仍需在单独的源码交付轮次更新。
+V4.3 完整源码测试与本地验收已通过，待本轮公网发布复验。正式 ZIP 与 clean-room 仍需在单独的 V4.4 交付轮次更新。
 
 ---
 
@@ -203,10 +217,10 @@ V4.2.1 完整源码测试、本地验收和公网验收均已通过。正式 ZIP
 
 ## 当前本地地址
 
-- Frontend：V4.2.1 运行于 `http://localhost:5173/`（HTTP 200）
-- Showcase：V4.2.1 运行于 `http://localhost:5173/showcase`
-- Backend：V4.2.1 运行于 `http://127.0.0.1:8000`
-- Health：`status=ok`、`version=4.2.1`、`environment=development`
+- Frontend：V4.3.0 运行于 `http://localhost:5173/`（HTTP 200）
+- Showcase：V4.3.0 运行于 `http://localhost:5173/showcase`
+- Backend：V4.3.0 运行于 `http://127.0.0.1:8000`
+- Health：`status=ok`、`version=4.3.0`、`environment=development`
 
 ---
 
@@ -217,15 +231,15 @@ V4.2.1 完整源码测试、本地验收和公网验收均已通过。正式 ZIP
 - Health：`https://handwrite-studio-api-production.up.railway.app/health`（HTTP 200，`status=ok`、`version=4.2.1`、`environment=production`）
 - Showcase：`https://handwrite-studio.pages.dev/showcase/`
 
-当前公网为 V4.2.1；正式前端与 API 均已完成发布后复验。
+当前公网仍为 V4.2.1；V4.3 将在本轮提交推送后发布并复验。
 
 ---
 
 ## 当前部署状态
 
-Railway FastAPI production 后端当前部署 V4.2.1：服务 `handwrite-studio-api`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。公网 HTTPS `/health` 已通过。`ALLOWED_ORIGINS` 精确设置为 `https://handwrite-studio.pages.dev`。Render 因绑卡要求停用。
+Railway FastAPI production 后端当前部署 V4.2.1，等待本轮 V4.3 推送自动发布：服务 `handwrite-studio-api`，构建器 `DOCKERFILE`，路径 `Dockerfile.api`。`ALLOWED_ORIGINS` 精确设置为 `https://handwrite-studio.pages.dev`。Render 因绑卡要求停用。
 
-Cloudflare Pages production 前端当前部署 V4.2.1：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。公网合成长文档与虚拟化验收已通过。
+Cloudflare Pages production 前端当前部署 V4.2.1，等待本轮 V4.3 推送自动发布：项目 `handwrite-studio`，正式域名 `https://handwrite-studio.pages.dev`，生产构建命令 `pnpm build:pages`，输出目录 `out`。生产环境使用 `NEXT_PUBLIC_API_BASE_URL=https://handwrite-studio-api-production.up.railway.app` 和 `NODE_VERSION=22.16.0`。
 
 ---
 
@@ -241,6 +255,8 @@ Cloudflare Pages production 前端当前部署 V4.2.1：项目 `handwrite-studio
 - 高 DPI 导出按页串行绘制，耗时随页数增加
 - 横线检测仅支持基本水平、无明显透视的纸张；旋转超过容差时会要求先归零
 - 用户上传的纸张照片如果本身含旧文字，导出仍会保留这些背景内容；应使用空白纸张照片
+- OCR Lite 只适合清晰、基本水平、无明显透视的印刷文字；识别结果必须人工校对后确认，医学内容不会自动猜测修正
+- OCR 模型约 1.7 MB、WASM 运行时约 3.9 MB，首次识别需加载同源静态资源，冷缓存会比后续识别慢
 
 ---
 

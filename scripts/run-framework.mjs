@@ -1,10 +1,17 @@
 import { spawnSync } from "node:child_process";
+import { rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { readExecutionProfile } from "./execution-profile.mjs";
+import "./prepare-ocr-assets.mjs";
 
 const [command, ...args] = process.argv.slice(2);
 if (!["dev", "build"].includes(command)) throw new Error("Expected dev or build.");
 const managedLinux = readExecutionProfile() === "managed-linux";
+
+// Next static export and Vinext generate incompatible route validators in the
+// same .next directory. Keep the portable dev/build path independent of the
+// command order by removing only this reproducible cache before Vinext starts.
+if (!managedLinux) rmSync(fileURLToPath(new URL("../.next", import.meta.url)), { recursive: true, force: true });
 
 if (managedLinux && command === "build") {
   const result = spawnSync("bash", [
